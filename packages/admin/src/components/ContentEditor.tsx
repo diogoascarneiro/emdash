@@ -812,7 +812,12 @@ export function ContentEditor({
 				</div>
 
 				{/* Sidebar - hidden in distraction-free mode */}
-				<div className={cn("space-y-6", isDistractionFree && "hidden")}>
+				<div
+					className={cn(
+						"space-y-6 lg:sticky lg:-top-6 lg:self-start lg:max-h-[calc(100svh-4rem)] lg:overflow-y-auto",
+						isDistractionFree && "hidden",
+					)}
+				>
 					{blockSidebarPanel ? (
 						/* Block sidebar panel – replaces default sections when a block requests it */
 						blockSidebarPanel.type === "image" ? (
