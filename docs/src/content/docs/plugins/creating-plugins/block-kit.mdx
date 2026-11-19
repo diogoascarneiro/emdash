@@ -381,6 +381,26 @@ const slides = elements.repeater("slides", "Slides", [
 ]);
 ```
 
+### Nest a repeater in a repeater
+
+A repeater subfield can be another repeater, one level deep, so each row can hold its own list. The nested repeater supports the same subfields as above, except `repeater`.
+
+The following field captures FAQ groups, each with its own questions:
+
+```typescript title="src/index.ts"
+import { elements } from "@emdash-cms/blocks";
+
+const groups = elements.repeater("groups", "Groups", [
+	elements.textInput("title", "Title"),
+	elements.repeater("questions", "Questions", [
+		elements.textInput("question", "Question"),
+		elements.textInput("answer", "Answer", { multiline: true }),
+	]),
+]);
+```
+
+The block stores each nested list as an array in its row, such as `{ "groups": [{ "title": "Billing", "questions": [{ "question": "…", "answer": "…" }] }] }`.
+
 ### Load select options from a plugin route
 
 A `select` in a Portable Text block's `fields` can set `optionsRoute` to fill its dropdown from one of the plugin's own routes. The same works for a `select` nested in a `repeater` in those fields.

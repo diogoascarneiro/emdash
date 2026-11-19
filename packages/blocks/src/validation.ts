@@ -46,6 +46,7 @@ const REPEATER_SUB_FIELD_TYPES = new Set([
 	"select",
 	"toggle",
 	"media_picker",
+	"repeater",
 ]);
 
 const COLUMN_FORMATS = new Set(["text", "badge", "relative_time", "number", "code", "element"]);
@@ -513,6 +514,7 @@ function validateElement(
 	path: string,
 	errors: ValidationError[],
 	policy?: BlockValidationPolicy,
+	insideRepeater = false,
 ): void {
 	if (!isRecord(value)) {
 		errors.push({ path, message: "Element must be an object" });
@@ -899,6 +901,13 @@ function validateElement(
 				for (let i = 0; i < value.fields.length; i++) {
 					const subPath = `${path}.fields[${i}]`;
 					const sub = value.fields[i];
+					if (isRecord(sub) && sub.type === "repeater" && insideRepeater) {
+						errors.push({
+							path: `${subPath}.type`,
+							message: "Repeaters can be nested only one level deep",
+						});
+						continue;
+					}
 					if (
 						isRecord(sub) &&
 						typeof sub.type === "string" &&
@@ -910,7 +919,7 @@ function validateElement(
 						});
 						continue;
 					}
-					validateElement(sub, subPath, errors, policy);
+					validateElement(sub, subPath, errors, policy, true);
 				}
 			}
 			if (value.item_label !== undefined && typeof value.item_label !== "string") {

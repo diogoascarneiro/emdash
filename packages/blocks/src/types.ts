@@ -121,17 +121,22 @@ export interface RadioElement {
 	initial_value?: string;
 }
 
-export type RepeaterSubField =
+export type ScalarRepeaterSubField =
 	| TextInputElement
 	| NumberInputElement
 	| SelectElement
 	| ToggleElement
 	| MediaPickerElement;
 
+/** A repeater inside a repeater row. Its own sub-fields must be scalar. */
+export type NestedRepeaterElement = RepeaterElement<ScalarRepeaterSubField>;
+
+export type RepeaterSubField = ScalarRepeaterSubField | NestedRepeaterElement;
+
 /**
  * Array-of-objects field. Renders as a list of collapsible cards with inline
  * add/remove and drag-and-drop reordering. Sub-fields are scalar Block Kit
- * elements keyed by their `action_id`.
+ * elements keyed by their `action_id`, or one level of nested repeater.
  *
  * Admin-authoring only: this element is rendered by the admin widget so plugin
  * blocks can capture repeating data. The runtime block renderer
@@ -139,13 +144,13 @@ export type RepeaterSubField =
  * values are persisted on the parent block and consumed by the plugin's own
  * runtime component, not re-rendered as a stand-alone block.
  */
-export interface RepeaterElement {
+export interface RepeaterElement<TField extends RepeaterSubField = RepeaterSubField> {
 	type: "repeater";
 	action_id: string;
 	label: string;
 	/** Singular label used in the UI (e.g. "FAQ" → "Add FAQ"). */
 	item_label?: string;
-	fields: RepeaterSubField[];
+	fields: TField[];
 	min_items?: number;
 	max_items?: number;
 	/**

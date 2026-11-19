@@ -210,6 +210,32 @@ describe("validateBlocks", () => {
 			expect(result).toEqual({ valid: true, errors: [] });
 		});
 
+		it("repeater with a nested repeater sub-field", () => {
+			const result = validateBlocks([
+				{
+					type: "actions",
+					elements: [
+						{
+							type: "repeater",
+							action_id: "cases",
+							label: "Cases",
+							fields: [
+								{ type: "text_input", action_id: "title", label: "Title" },
+								{
+									type: "repeater",
+									action_id: "rows",
+									label: "Rows",
+									max_items: 3,
+									fields: [{ type: "text_input", action_id: "label", label: "Label" }],
+								},
+							],
+						},
+					],
+				},
+			]);
+			expect(result).toEqual({ valid: true, errors: [] });
+		});
+
 		it("media_picker (minimal)", () => {
 			const result = validateBlocks([
 				{
@@ -615,6 +641,71 @@ describe("validateBlocks", () => {
 			expect(
 				result.errors.find((e) => e.path === "blocks[0].elements[0].fields[0].type")!.message,
 			).toContain("not allowed");
+		});
+
+		it("repeater nested more than one level deep", () => {
+			const result = validateBlocks([
+				{
+					type: "actions",
+					elements: [
+						{
+							type: "repeater",
+							action_id: "a",
+							label: "A",
+							fields: [
+								{
+									type: "repeater",
+									action_id: "b",
+									label: "B",
+									fields: [
+										{
+											type: "repeater",
+											action_id: "c",
+											label: "C",
+											fields: [{ type: "text_input", action_id: "d", label: "D" }],
+										},
+									],
+								},
+							],
+						},
+					],
+				},
+			]);
+			expect(result.valid).toBe(false);
+			expect(result.errors).toEqual([
+				{
+					path: "blocks[0].elements[0].fields[0].fields[0].type",
+					message: "Repeaters can be nested only one level deep",
+				},
+			]);
+		});
+
+		it("nested repeater with an invalid sub-field", () => {
+			const result = validateBlocks([
+				{
+					type: "actions",
+					elements: [
+						{
+							type: "repeater",
+							action_id: "a",
+							label: "A",
+							fields: [
+								{
+									type: "repeater",
+									action_id: "b",
+									label: "B",
+									min_items: 2,
+									max_items: 1,
+									fields: [{ type: "text_input", action_id: "d" }],
+								},
+							],
+						},
+					],
+				},
+			]);
+			const paths = result.errors.map((e) => e.path);
+			expect(paths).toContain("blocks[0].elements[0].fields[0].min_items");
+			expect(paths).toContain("blocks[0].elements[0].fields[0].fields[0].label");
 		});
 
 		it("repeater with non-integer min_items / max_items", () => {

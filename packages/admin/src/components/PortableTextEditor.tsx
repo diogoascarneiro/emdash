@@ -1652,6 +1652,9 @@ function BlockKitRepeater({
 				case "number_input":
 					newItem[sf.action_id] = undefined;
 					break;
+				case "repeater":
+					newItem[sf.action_id] = [];
+					break;
 				default:
 					newItem[sf.action_id] = "";
 			}

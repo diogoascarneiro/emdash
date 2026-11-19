@@ -39,6 +39,8 @@ export type {
 	RadioElement,
 	RepeaterElement,
 	RepeaterSubField,
+	ScalarRepeaterSubField,
+	NestedRepeaterElement,
 	MediaPickerElement,
 	Element,
 	// Form

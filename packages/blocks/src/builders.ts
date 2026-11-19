@@ -366,17 +366,17 @@ function radio(
 	};
 }
 
-function repeater(
+function repeater<TField extends RepeaterSubField>(
 	actionId: string,
 	label: string,
-	fields: RepeaterSubField[],
+	fields: TField[],
 	opts?: {
 		itemLabel?: string;
 		minItems?: number;
 		maxItems?: number;
 		initialValue?: Array<Record<string, unknown>>;
 	},
-): RepeaterElement {
+): RepeaterElement<TField> {
 	return {
 		type: "repeater",
 		action_id: actionId,
