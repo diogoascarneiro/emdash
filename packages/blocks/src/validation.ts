@@ -49,6 +49,8 @@ const REPEATER_SUB_FIELD_TYPES = new Set([
 	"repeater",
 ]);
 
+const MAX_REPEATER_NESTING = 2;
+
 const COLUMN_FORMATS = new Set(["text", "badge", "relative_time", "number", "code", "element"]);
 const TABLE_CELL_ELEMENT_TYPES = new Set(["button", "link", "menu"]);
 
@@ -514,7 +516,7 @@ function validateElement(
 	path: string,
 	errors: ValidationError[],
 	policy?: BlockValidationPolicy,
-	insideRepeater = false,
+	enclosingRepeaters = 0,
 ): void {
 	if (!isRecord(value)) {
 		errors.push({ path, message: "Element must be an object" });
@@ -901,10 +903,14 @@ function validateElement(
 				for (let i = 0; i < value.fields.length; i++) {
 					const subPath = `${path}.fields[${i}]`;
 					const sub = value.fields[i];
-					if (isRecord(sub) && sub.type === "repeater" && insideRepeater) {
+					if (
+						isRecord(sub) &&
+						sub.type === "repeater" &&
+						enclosingRepeaters >= MAX_REPEATER_NESTING
+					) {
 						errors.push({
 							path: `${subPath}.type`,
-							message: "Repeaters can be nested only one level deep",
+							message: `Repeaters can be nested only ${MAX_REPEATER_NESTING} levels deep`,
 						});
 						continue;
 					}
@@ -919,7 +925,7 @@ function validateElement(
 						});
 						continue;
 					}
-					validateElement(sub, subPath, errors, policy, true);
+					validateElement(sub, subPath, errors, policy, enclosingRepeaters + 1);
 				}
 			}
 			if (value.item_label !== undefined && typeof value.item_label !== "string") {

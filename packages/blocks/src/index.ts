@@ -41,6 +41,7 @@ export type {
 	RepeaterSubField,
 	ScalarRepeaterSubField,
 	NestedRepeaterElement,
+	InnermostRepeaterElement,
 	MediaPickerElement,
 	Element,
 	// Form

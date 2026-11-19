@@ -210,23 +210,31 @@ describe("validateBlocks", () => {
 			expect(result).toEqual({ valid: true, errors: [] });
 		});
 
-		it("repeater with a nested repeater sub-field", () => {
+		it("repeater with repeaters nested two levels deep", () => {
 			const result = validateBlocks([
 				{
 					type: "actions",
 					elements: [
 						{
 							type: "repeater",
-							action_id: "cases",
-							label: "Cases",
+							action_id: "categories",
+							label: "Categories",
 							fields: [
-								{ type: "text_input", action_id: "title", label: "Title" },
+								{ type: "text_input", action_id: "label", label: "Label" },
 								{
 									type: "repeater",
-									action_id: "rows",
-									label: "Rows",
+									action_id: "products",
+									label: "Products",
 									max_items: 3,
-									fields: [{ type: "text_input", action_id: "label", label: "Label" }],
+									fields: [
+										{ type: "text_input", action_id: "name", label: "Name" },
+										{
+											type: "repeater",
+											action_id: "rates",
+											label: "Rates",
+											fields: [{ type: "text_input", action_id: "price", label: "Price" }],
+										},
+									],
 								},
 							],
 						},
@@ -643,7 +651,7 @@ describe("validateBlocks", () => {
 			).toContain("not allowed");
 		});
 
-		it("repeater nested more than one level deep", () => {
+		it("repeater nested more than two levels deep", () => {
 			const result = validateBlocks([
 				{
 					type: "actions",
@@ -662,7 +670,14 @@ describe("validateBlocks", () => {
 											type: "repeater",
 											action_id: "c",
 											label: "C",
-											fields: [{ type: "text_input", action_id: "d", label: "D" }],
+											fields: [
+												{
+													type: "repeater",
+													action_id: "d",
+													label: "D",
+													fields: [{ type: "text_input", action_id: "e", label: "E" }],
+												},
+											],
 										},
 									],
 								},
@@ -674,8 +689,8 @@ describe("validateBlocks", () => {
 			expect(result.valid).toBe(false);
 			expect(result.errors).toEqual([
 				{
-					path: "blocks[0].elements[0].fields[0].fields[0].type",
-					message: "Repeaters can be nested only one level deep",
+					path: "blocks[0].elements[0].fields[0].fields[0].fields[0].type",
+					message: "Repeaters can be nested only 2 levels deep",
 				},
 			]);
 		});

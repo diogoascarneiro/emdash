@@ -128,15 +128,20 @@ export type ScalarRepeaterSubField =
 	| ToggleElement
 	| MediaPickerElement;
 
-/** A repeater inside a repeater row. Its own sub-fields must be scalar. */
-export type NestedRepeaterElement = RepeaterElement<ScalarRepeaterSubField>;
+/** A repeater two levels deep. Its own sub-fields must be scalar. */
+export type InnermostRepeaterElement = RepeaterElement<ScalarRepeaterSubField>;
+
+/** A repeater inside a repeater row. It can hold one more level of repeater. */
+export type NestedRepeaterElement = RepeaterElement<
+	ScalarRepeaterSubField | InnermostRepeaterElement
+>;
 
 export type RepeaterSubField = ScalarRepeaterSubField | NestedRepeaterElement;
 
 /**
  * Array-of-objects field. Renders as a list of collapsible cards with inline
  * add/remove and drag-and-drop reordering. Sub-fields are scalar Block Kit
- * elements keyed by their `action_id`, or one level of nested repeater.
+ * elements keyed by their `action_id`, or nested repeaters up to two levels deep.
  *
  * Admin-authoring only: this element is rendered by the admin widget so plugin
  * blocks can capture repeating data. The runtime block renderer

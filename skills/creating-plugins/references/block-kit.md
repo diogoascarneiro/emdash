@@ -94,7 +94,7 @@ routes: {
 | `radio`        | Single-select radio buttons                                                              |
 | `date_input`   | Date picker                                                                              |
 | `combobox`     | Searchable dropdown select                                                               |
-| `repeater`     | Array of records with scalar sub-fields or one nested repeater level                     |
+| `repeater`     | Array of records with scalar sub-fields or nested repeaters, up to two levels deep       |
 | `media_picker` | Media-library picker that stores the asset URL                                           |
 
 ## Block Syntax
@@ -408,7 +408,7 @@ Use `tab` to group related blocks into labelled panels:
 
 `repeater` is an authoring element for native plugin Portable Text block forms. `media_picker` works there and in [declarative field widgets](#declarative-field-widgets). Neither is an ordinary field in a sandboxed admin-page `form`.
 
-`repeater` captures an array of objects. Its nested fields support `text_input`, `number_input`, `select`, `toggle`, `media_picker`, and one level of nested `repeater`. A nested repeater's own fields cannot be another `repeater`; its value is an array inside each row.
+`repeater` captures an array of objects. Its nested fields support `text_input`, `number_input`, `select`, `toggle`, `media_picker`, and nested `repeater` up to two levels deep. A repeater at the second level cannot contain another `repeater`. Each nested value is an array inside its row.
 
 The following repeater captures images and captions. Each `image` value is the selected asset's URL string:
 
