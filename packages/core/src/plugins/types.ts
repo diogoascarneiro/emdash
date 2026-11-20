@@ -50,6 +50,7 @@ import type { z } from "astro/zod";
 // =============================================================================
 
 import type { ContentFieldFilters } from "../content-list-query.js";
+import type { BlockFieldDefinition, BlockFieldType } from "../schema/block-types.js";
 import type { FieldType, FieldValidation, FieldWidgetOptions } from "../schema/types.js";
 
 export type {
@@ -433,6 +434,34 @@ export interface ContentRevisionInfo {
 	createdAt: string;
 }
 
+/** A field inside one version of a block type. Repeater sub-fields are in `validation.subFields`. */
+export interface BlockFieldSchemaInfo {
+	slug: string;
+	label: string;
+	type: BlockFieldType;
+	required: boolean;
+	validation?: BlockFieldDefinition["validation"];
+	options?: BlockFieldDefinition["options"];
+}
+
+export interface BlockTypeVersionSchemaInfo {
+	version: number;
+	/** Changes when the version's fields change, so a plugin can cache work derived from them. */
+	fingerprint: string;
+	/** The version new blocks are written with. Older retained versions still describe stored blocks. */
+	active: boolean;
+	fields: BlockFieldSchemaInfo[];
+	/** Set when the stored version uses field types this runtime can't interpret. `fields` is then empty; leave its blocks alone. */
+	unsupportedTypes?: Array<{ type: string; path: string }>;
+}
+
+export interface BlockTypeSchemaInfo {
+	slug: string;
+	label: string;
+	currentVersion: number;
+	versions: BlockTypeVersionSchemaInfo[];
+}
+
 export interface FieldSchemaInfo {
 	slug: string;
 	label: string;
@@ -443,6 +472,12 @@ export interface FieldSchemaInfo {
 	validation?: FieldValidation;
 	widget?: string;
 	options?: FieldWidgetOptions;
+	/**
+	 * Only on `blocks` fields: the block types named by `validation.allowedTypes` and
+	 * `validation.retiredTypes`, with every retained version. A slug with no entry here
+	 * has no usable definition, so skip its blocks.
+	 */
+	blockTypes?: BlockTypeSchemaInfo[];
 	searchable: boolean;
 	indexed: boolean;
 	translatable: boolean;

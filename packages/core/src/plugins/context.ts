@@ -50,7 +50,9 @@ import { enrichImageMetadata } from "../media/enrich.js";
 import { isRouteCachedMedia } from "../media/image-endpoint.js";
 import { matchesMimeAllowlist, normalizeMime } from "../media/mime.js";
 import { markContentMediaUsageCollectionStaleSafely } from "../media/usage/content-refresh.js";
+import { resolveBlockTypes, type ResolvedBlockTypes } from "../schema/block-values.js";
 import { SchemaRegistry } from "../schema/registry.js";
+import type { CollectionWithFields, Field } from "../schema/types.js";
 import { invalidateSiteSettingsCache } from "../settings/index.js";
 import type { Storage } from "../storage/types.js";
 import { createBylineAccess } from "./byline-access.js";
@@ -118,6 +120,7 @@ import type {
 	RedirectUpdateInput,
 	VersionedRedirect,
 	SchemaAccess,
+	BlockTypeSchemaInfo,
 	CollectionSchemaInfo,
 	PluginContentCreateCallback,
 } from "./types.js";
@@ -343,8 +346,57 @@ function taxonomyToTermInfo(term: Taxonomy): TaxonomyTermInfo {
 	};
 }
 
+function blockTypesForField(
+	field: Field,
+	resolved: ResolvedBlockTypes | undefined,
+): BlockTypeSchemaInfo[] | undefined {
+	if (field.type !== "blocks" || !resolved) return undefined;
+	const slugs = new Set([
+		...(field.validation?.allowedTypes ?? []),
+		...(field.validation?.retiredTypes ?? []),
+	]);
+	const blockTypes: BlockTypeSchemaInfo[] = [];
+	for (const slug of slugs) {
+		const type = resolved.get(slug);
+		if (!type) continue;
+		blockTypes.push({
+			slug: type.slug,
+			label: type.label,
+			currentVersion: type.currentVersion,
+			versions: type.versions.map((version) => ({
+				version: version.version,
+				fingerprint: version.fingerprint,
+				active: version.active,
+				fields: (version.unsupportedTypes?.length ? [] : version.fields).map((blockField) => ({
+					slug: blockField.slug,
+					label: blockField.label,
+					type: blockField.type,
+					required: blockField.required ?? false,
+					...(blockField.validation === undefined ? {} : { validation: blockField.validation }),
+					...(blockField.options === undefined ? {} : { options: blockField.options }),
+				})),
+				...(version.unsupportedTypes?.length ? { unsupportedTypes: version.unsupportedTypes } : {}),
+			})),
+		});
+	}
+	return blockTypes;
+}
+
+/** Block types are only loaded when some field needs them. */
+function resolveBlockTypesIfNeeded(
+	db: Kysely<Database>,
+	collections: CollectionWithFields[],
+): Promise<ResolvedBlockTypes | undefined> {
+	return collections.some((collection) =>
+		collection.fields.some((field) => field.type === "blocks"),
+	)
+		? resolveBlockTypes(db)
+		: Promise.resolve(undefined);
+}
+
 function collectionToSchemaInfo(
-	collection: Awaited<ReturnType<SchemaRegistry["getCollectionWithFields"]>>,
+	collection: CollectionWithFields | null,
+	resolvedBlockTypes?: ResolvedBlockTypes,
 ): CollectionSchemaInfo | null {
 	if (!collection) return null;
 	return {
@@ -369,6 +421,9 @@ function collectionToSchemaInfo(
 			...(field.validation === undefined ? {} : { validation: field.validation }),
 			...(field.widget === undefined ? {} : { widget: field.widget }),
 			...(field.options === undefined ? {} : { options: field.options }),
+			...(field.type === "blocks"
+				? { blockTypes: blockTypesForField(field, resolvedBlockTypes) ?? [] }
+				: {}),
 			searchable: field.searchable,
 			indexed: field.indexed,
 			translatable: field.translatable,
@@ -381,15 +436,19 @@ export function createSchemaAccess(db: Kysely<Database>): SchemaAccess {
 	const registry = new SchemaRegistry(db);
 	return {
 		async listCollections() {
+			const stored = await registry.listCollectionsWithFields();
+			const resolved = await resolveBlockTypesIfNeeded(db, stored);
 			const collections: CollectionSchemaInfo[] = [];
-			for (const collection of await registry.listCollectionsWithFields()) {
-				const info = collectionToSchemaInfo(collection);
+			for (const collection of stored) {
+				const info = collectionToSchemaInfo(collection, resolved);
 				if (info) collections.push(info);
 			}
 			return collections;
 		},
 		async getCollection(slug) {
-			return collectionToSchemaInfo(await registry.getCollectionWithFields(slug));
+			const stored = await registry.getCollectionWithFields(slug);
+			if (!stored) return null;
+			return collectionToSchemaInfo(stored, await resolveBlockTypesIfNeeded(db, [stored]));
 		},
 	};
 }
