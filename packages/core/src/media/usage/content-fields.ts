@@ -4,8 +4,9 @@ import type { Database } from "../../database/types.js";
 import { validateIdentifier } from "../../database/validate.js";
 import { BlockTypeRegistry } from "../../schema/block-type-registry.js";
 import type { BlockType } from "../../schema/block-types.js";
+import { MAX_REPEATER_NESTING } from "../../schema/repeater-sub-fields.js";
 import { isStoragelessFieldRow } from "../../schema/types.js";
-import { buildCanonicalSha256Fingerprint } from "./projection-fingerprint.js";
+import { buildCanonicalSha256Fingerprint, subFieldIdentities } from "./projection-fingerprint.js";
 import type { MediaUsageExtractionField, MediaUsageExtractionSubField } from "./types.js";
 import { CONTENT_SOURCE_SCHEMA_VERSION } from "./types.js";
 
@@ -37,9 +38,7 @@ export async function buildContentMediaUsageFieldFingerprint(
 				: {}),
 			...(field.type === "repeater"
 				? {
-						subFields: (field.validation?.subFields ?? [])
-							.map((subField) => ({ slug: subField.slug, type: subField.type }))
-							.toSorted(compareFieldIdentity),
+						subFields: subFieldIdentities(field.validation?.subFields),
 					}
 				: {}),
 		}))
@@ -179,14 +178,28 @@ function normalizeRepeaterImageSubFields(
 	rawValidation: string | null,
 ): MediaUsageExtractionSubField[] {
 	const validation = parseValidation(rawValidation, "repeater");
-	if (!isRecord(validation) || !Array.isArray(validation.subFields)) return [];
+	if (!isRecord(validation)) return [];
+	return imageSubFields(validation.subFields, 1);
+}
 
+/** Image sub-fields, and nested repeaters that hold one, pruned to what extraction reads. */
+function imageSubFields(
+	value: unknown,
+	enclosingRepeaters: number,
+): MediaUsageExtractionSubField[] {
+	if (!Array.isArray(value)) return [];
 	const subFields: MediaUsageExtractionSubField[] = [];
-	for (const subField of validation.subFields) {
-		if (!isRecord(subField) || subField.type !== "image") continue;
-		if (typeof subField.slug !== "string") continue;
-		validateIdentifier(subField.slug, "media usage repeater sub-field slug");
-		subFields.push({ slug: subField.slug, type: "image" });
+	for (const subField of value) {
+		if (!isRecord(subField) || typeof subField.slug !== "string") continue;
+		if (subField.type === "image") {
+			validateIdentifier(subField.slug, "media usage repeater sub-field slug");
+			subFields.push({ slug: subField.slug, type: "image" });
+		} else if (subField.type === "repeater" && enclosingRepeaters <= MAX_REPEATER_NESTING) {
+			const nested = imageSubFields(subField.subFields, enclosingRepeaters + 1);
+			if (nested.length === 0) continue;
+			validateIdentifier(subField.slug, "media usage repeater sub-field slug");
+			subFields.push({ slug: subField.slug, type: "repeater", subFields: nested });
+		}
 	}
 
 	return subFields.toSorted((a, b) => a.slug.localeCompare(b.slug));

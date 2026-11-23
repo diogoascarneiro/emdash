@@ -171,6 +171,74 @@ interface RepeaterSubFieldState {
 	options: string;
 	/** The type the sub-field was saved with, if it has been saved. */
 	persistedType?: string;
+	/** For a `repeater` sub-field: its own sub-fields and item limits. */
+	subFields?: RepeaterSubFieldState[];
+	minItems?: string;
+	maxItems?: string;
+}
+
+/** How many repeaters can enclose a repeater sub-field, as on the server. */
+const MAX_REPEATER_NESTING = 2;
+
+function newSubField(): RepeaterSubFieldState {
+	return {
+		slug: "",
+		slugEdited: false,
+		slugPersisted: false,
+		type: "string",
+		label: "",
+		required: false,
+		options: "",
+	};
+}
+
+function subFieldState(raw: unknown): RepeaterSubFieldState {
+	const stored: Record<string, unknown> =
+		typeof raw === "object" && raw !== null ? Object.fromEntries(Object.entries(raw)) : {};
+	const type = typeof stored.type === "string" ? stored.type : "string";
+	const options = Array.isArray(stored.options)
+		? stored.options.filter((option): option is string => typeof option === "string")
+		: [];
+	return {
+		slug: typeof stored.slug === "string" ? stored.slug : "",
+		slugEdited: true,
+		slugPersisted: true,
+		type,
+		persistedType: type,
+		label: typeof stored.label === "string" ? stored.label : "",
+		required: stored.required === true,
+		options: options.join("\n"),
+		...(type === "repeater"
+			? {
+					subFields: Array.isArray(stored.subFields) ? stored.subFields.map(subFieldState) : [],
+					minItems: typeof stored.minItems === "number" ? String(stored.minItems) : "",
+					maxItems: typeof stored.maxItems === "number" ? String(stored.maxItems) : "",
+				}
+			: {}),
+	};
+}
+
+function subFieldDefinition(sf: RepeaterSubFieldState): Record<string, unknown> {
+	const base = {
+		slug: sf.slug,
+		type: sf.type,
+		label: sf.label,
+		required: sf.required || undefined,
+	};
+	if (sf.type === "repeater") {
+		return {
+			...base,
+			subFields: (sf.subFields ?? []).map(subFieldDefinition),
+			...(sf.minItems ? { minItems: wholeNumber(sf.minItems) } : {}),
+			...(sf.maxItems ? { maxItems: wholeNumber(sf.maxItems) } : {}),
+		};
+	}
+	return {
+		...base,
+		...(sf.type === "select" && optionList(sf.options).length > 0
+			? { options: optionList(sf.options) }
+			: {}),
+	};
 }
 
 interface FieldFormState {
@@ -226,18 +294,8 @@ function getInitialFormState(field?: SchemaField): FieldFormState {
 			max: field.validation?.max?.toString() ?? "",
 			pattern: field.validation?.pattern ?? "",
 			options: field.validation?.options?.join("\n") ?? "",
-			subFields: (field.validation as Record<string, unknown>)?.subFields
-				? (
-						(field.validation as Record<string, unknown>).subFields as Array<
-							Omit<RepeaterSubFieldState, "options"> & { options?: string[] }
-						>
-					).map((sf) => ({
-						...sf,
-						options: sf.options?.join("\n") ?? "",
-						persistedType: sf.type,
-						slugEdited: true,
-						slugPersisted: true,
-					}))
+			subFields: Array.isArray((field.validation as Record<string, unknown>)?.subFields)
+				? ((field.validation as Record<string, unknown>).subFields as unknown[]).map(subFieldState)
 				: [],
 			minItems: (field.validation as Record<string, unknown>)?.minItems?.toString() ?? "",
 			maxItems: (field.validation as Record<string, unknown>)?.maxItems?.toString() ?? "",
@@ -312,12 +370,60 @@ const FIELD_INPUTS = [
 
 type FieldInput = (typeof FIELD_INPUTS)[number];
 
-type SubFieldInput = "label" | "slug" | "options";
+interface SubFieldProblems {
+	label?: MessageDescriptor;
+	slug?: MessageDescriptor;
+	options?: MessageDescriptor;
+	/** A nested list with no sub-fields. */
+	subFields?: MessageDescriptor;
+	minItems?: MessageDescriptor;
+	maxItems?: MessageDescriptor;
+	/** Problems of a nested list's own sub-fields, by position. */
+	nested: SubFieldProblems[];
+}
+
+interface SubFieldErrors {
+	label?: string;
+	slug?: string;
+	options?: string;
+	subFields?: string;
+	minItems?: string;
+	maxItems?: string;
+	nested: SubFieldErrors[];
+}
+
+function hasSubFieldProblem(problems: SubFieldProblems): boolean {
+	return (
+		Boolean(
+			problems.label ||
+			problems.slug ||
+			problems.options ||
+			problems.subFields ||
+			problems.minItems ||
+			problems.maxItems,
+		) || problems.nested.some(hasSubFieldProblem)
+	);
+}
+
+function subFieldErrors(
+	problems: SubFieldProblems,
+	translate: (message: MessageDescriptor) => string,
+): SubFieldErrors {
+	return {
+		label: problems.label && translate(problems.label),
+		slug: problems.slug && translate(problems.slug),
+		options: problems.options && translate(problems.options),
+		subFields: problems.subFields && translate(problems.subFields),
+		minItems: problems.minItems && translate(problems.minItems),
+		maxItems: problems.maxItems && translate(problems.maxItems),
+		nested: problems.nested.map((nested) => subFieldErrors(nested, translate)),
+	};
+}
 
 interface FormProblems {
 	fields: Partial<Record<FieldInput, MessageDescriptor>>;
 	/** By the sub-field's position. */
-	subFields: Partial<Record<SubFieldInput, MessageDescriptor>>[];
+	subFields: SubFieldProblems[];
 }
 
 interface ProblemContext {
@@ -402,7 +508,11 @@ function optionList(options: string): string[] {
  * Checks item limits as the server does, which puts a clash between them on
  * the maximum. A blocks field also caps both at `MAX_BLOCKS_ITEMS`.
  */
-function checkItemLimits(fields: FormProblems["fields"], state: FieldFormState, capped: boolean) {
+function checkItemLimits(
+	fields: Partial<Record<"minItems" | "maxItems", MessageDescriptor>>,
+	state: { minItems: string; maxItems: string },
+	capped: boolean,
+) {
 	const minItems = wholeNumber(state.minItems);
 	const maxItems = wholeNumber(state.maxItems);
 	if (belowOrNaN(minItems, 0)) fields.minItems = AT_LEAST_ZERO;
@@ -415,6 +525,41 @@ function checkItemLimits(fields: FormProblems["fields"], state: FieldFormState, 
 	} else if (minItems !== undefined && maxItems !== undefined && minItems > maxItems) {
 		fields.maxItems = MAXIMUM_BELOW_MINIMUM;
 	}
+}
+
+/** The problems of each sub-field in a list, and of the lists nested in them. */
+function subFieldProblems(list: RepeaterSubFieldState[]): SubFieldProblems[] {
+	return list.map((sf, index) => {
+		const problems: SubFieldProblems = { nested: [] };
+		const label = sf.label.trim();
+		if (!label) problems.label = ENTER_LABEL;
+		if (!sf.slug) {
+			if (sf.slugEdited) problems.slug = ENTER_SLUG;
+			else if (label) {
+				problems.slug = msg`A slug cannot be generated from this label. Type one manually.`;
+			}
+		} else if (!sf.slugPersisted) {
+			const format = slugFormatProblem(sf.slug);
+			if (format) problems.slug = format;
+			else if (list.findIndex((other) => other.slug === sf.slug) !== index) {
+				problems.slug = msg`Another sub-field already uses this slug. Enter a different one.`;
+			}
+		}
+		if (needsOptions(sf) && optionList(sf.options).length === 0) {
+			problems.options = ADD_AN_OPTION;
+		}
+		if (sf.type === "repeater") {
+			const nested = sf.subFields ?? [];
+			if (nested.length === 0) problems.subFields = msg`Add at least one sub-field to this list.`;
+			problems.nested = subFieldProblems(nested);
+			checkItemLimits(
+				problems,
+				{ minItems: sf.minItems ?? "", maxItems: sf.maxItems ?? "" },
+				false,
+			);
+		}
+		return problems;
+	});
 }
 
 /** What keeps the form from saving, matching what the server would reject. */
@@ -468,32 +613,12 @@ function formProblems(state: FieldFormState, context: ProblemContext): FormProbl
 		fields.options = ADD_AN_OPTION;
 	}
 
-	const subFields: FormProblems["subFields"] = [];
+	let subFields: FormProblems["subFields"] = [];
 	if (type === "repeater") {
 		if (state.subFields.length === 0) {
 			fields.subFields = msg`Add at least one sub-field to define the repeater structure.`;
 		}
-		state.subFields.forEach((sf, index) => {
-			const problems: FormProblems["subFields"][number] = {};
-			const label = sf.label.trim();
-			if (!label) problems.label = ENTER_LABEL;
-			if (!sf.slug) {
-				if (sf.slugEdited) problems.slug = ENTER_SLUG;
-				else if (label) {
-					problems.slug = msg`A slug cannot be generated from this label. Type one manually.`;
-				}
-			} else if (!sf.slugPersisted) {
-				const format = slugFormatProblem(sf.slug);
-				if (format) problems.slug = format;
-				else if (state.subFields.findIndex((other) => other.slug === sf.slug) !== index) {
-					problems.slug = msg`Another sub-field already uses this slug. Enter a different one.`;
-				}
-			}
-			if (needsOptions(sf) && optionList(sf.options).length === 0) {
-				problems.options = ADD_AN_OPTION;
-			}
-			subFields[index] = problems;
-		});
+		subFields = subFieldProblems(state.subFields);
 		checkItemLimits(fields, state, false);
 	}
 
@@ -520,6 +645,210 @@ function slugRejection(error: unknown): MessageDescriptor | undefined {
 	}
 	if (error.code === "RESERVED_SLUG") return msg`This slug is reserved. Enter a different one.`;
 	return undefined;
+}
+
+interface SubFieldCardsProps {
+	subFields: RepeaterSubFieldState[];
+	errors: SubFieldErrors[];
+	/** How many repeaters enclose this list, counting the field itself. */
+	enclosing: number;
+	/** Names this list's number inputs, which `unreadable` refers to. */
+	namePrefix: string;
+	unreadable: ReadonlySet<string>;
+	onChange: (next: RepeaterSubFieldState[]) => void;
+}
+
+/** The sub-fields of a repeater, with a nested repeater's own list under it. */
+function SubFieldCards({
+	subFields,
+	errors,
+	enclosing,
+	namePrefix,
+	unreadable,
+	onChange,
+}: SubFieldCardsProps) {
+	const { t } = useLingui();
+	const emptyListId = React.useId();
+	const update = (index: number, change: Partial<RepeaterSubFieldState>) =>
+		onChange(subFields.map((sf, j) => (j === index ? { ...sf, ...change } : sf)));
+
+	return (
+		<>
+			{subFields.map((sf, i) => {
+				const errorsAt = errors[i] ?? { nested: [] };
+				const slugUnderivableAt = !sf.slug && !sf.slugEdited && sf.label.trim().length > 0;
+				const name = sf.label || sf.slug;
+				// A saved sub-field cannot switch between a single value and a list: stored rows would
+				// no longer match.
+				const canBeList =
+					enclosing <= MAX_REPEATER_NESTING &&
+					(sf.persistedType === undefined || sf.persistedType === "repeater");
+				return (
+					<div key={i} className="flex gap-2 items-start border rounded-lg p-3">
+						<div className="flex-1 min-w-0 space-y-2">
+							<div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2">
+								<Input
+									label={t`Label`}
+									className="min-w-0"
+									value={sf.label}
+									onChange={(e) =>
+										update(i, {
+											label: e.target.value,
+											...(sf.slugEdited ? {} : { slug: slugifyIdentifier(e.target.value) }),
+										})
+									}
+									placeholder={t`Field label`}
+									required
+									error={errorsAt.label}
+									aria-invalid={errorsAt.label ? true : undefined}
+								/>
+								<Input
+									dir="ltr"
+									label={
+										sf.slugPersisted ? (
+											<HelpLabel help={t`Sub-field slugs cannot be changed after creation.`}>
+												{t`Slug`}
+											</HelpLabel>
+										) : (
+											t`Slug`
+										)
+									}
+									aria-label={t`Slug`}
+									className="min-w-0"
+									value={sf.slug}
+									disabled={sf.slugPersisted}
+									onChange={(e) => update(i, { slug: e.target.value, slugEdited: true })}
+									placeholder={t`field_slug`}
+									required={!sf.slugPersisted || undefined}
+									description={
+										slugUnderivableAt
+											? t`A slug cannot be generated from this label. Type one manually.`
+											: undefined
+									}
+									error={errorsAt.slug}
+									aria-invalid={errorsAt.slug ? true : undefined}
+								/>
+								<Select
+									label={t`Type`}
+									value={sf.type}
+									disabled={sf.persistedType === "repeater" || undefined}
+									onValueChange={(v) => {
+										const type = v ?? "string";
+										update(i, {
+											type,
+											...(type === "repeater"
+												? { subFields: sf.subFields ?? [], minItems: "", maxItems: "" }
+												: {}),
+										});
+									}}
+									items={{
+										string: t`Short Text`,
+										text: t`Long Text`,
+										number: t`Number`,
+										integer: t`Integer`,
+										boolean: t`Boolean`,
+										datetime: t`Date & Time`,
+										select: t`Select`,
+										url: t`URL`,
+										image: t`Image`,
+										...(canBeList || sf.type === "repeater" ? { repeater: t`Repeater` } : {}),
+									}}
+								/>
+							</div>
+							{sf.type === "select" && (
+								<InputArea
+									label={t`Options (one per line)`}
+									value={sf.options}
+									onChange={(e) => update(i, { options: e.target.value })}
+									placeholder={t`Option 1\nOption 2\nOption 3`}
+									rows={3}
+									required={needsOptions(sf) || undefined}
+									error={errorsAt.options}
+									aria-invalid={errorsAt.options ? true : undefined}
+								/>
+							)}
+							<Switch
+								label={t`Required`}
+								checked={sf.required ?? false}
+								onCheckedChange={(checked) => update(i, { required: checked })}
+							/>
+							{sf.type === "repeater" && (
+								<div
+									role="group"
+									aria-label={t`Sub-fields of ${name}`}
+									className="space-y-2 border-s ps-3"
+								>
+									<div className="flex items-center justify-between gap-2">
+										<p className="text-sm font-medium">{t`Sub-Fields`}</p>
+										<div data-field-invalid={errorsAt.subFields ? true : undefined}>
+											<Button
+												variant="outline"
+												size="sm"
+												icon={<Plus />}
+												aria-label={t`Add sub-field to ${name}`}
+												aria-describedby={errorsAt.subFields ? `${emptyListId}-${i}` : undefined}
+												onClick={() =>
+													update(i, { subFields: [...(sf.subFields ?? []), newSubField()] })
+												}
+											>
+												{t`Add Sub-Field`}
+											</Button>
+										</div>
+									</div>
+									{(sf.subFields ?? []).length === 0 && (
+										<p
+											id={`${emptyListId}-${i}`}
+											className={cn(
+												"text-sm text-center py-2",
+												errorsAt.subFields ? "text-kumo-danger" : "text-kumo-subtle",
+											)}
+										>
+											{t`Add at least one sub-field to this list.`}
+										</p>
+									)}
+									<SubFieldCards
+										subFields={sf.subFields ?? []}
+										errors={errorsAt.nested}
+										enclosing={enclosing + 1}
+										namePrefix={`${namePrefix}${i}.`}
+										unreadable={unreadable}
+										onChange={(next) => update(i, { subFields: next })}
+									/>
+									<div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 sm:gap-4">
+										{(["minItems", "maxItems"] as const).map((limit) => {
+											const inputName = `${namePrefix}${i}.${limit}`;
+											const error = unreadable.has(inputName) ? t(NOT_A_NUMBER) : errorsAt[limit];
+											return (
+												<Input
+													key={limit}
+													name={inputName}
+													label={limit === "minItems" ? t`Min Items` : t`Max Items`}
+													type="number"
+													value={sf[limit] ?? ""}
+													onChange={(e) => update(i, { [limit]: e.target.value })}
+													placeholder={limit === "minItems" ? "0" : t`No limit`}
+													error={error}
+													aria-invalid={error ? true : undefined}
+												/>
+											);
+										})}
+									</div>
+								</div>
+							)}
+						</div>
+						<Button
+							variant="ghost"
+							shape="square"
+							onClick={() => onChange(subFields.filter((_, j) => j !== i))}
+							aria-label={t`Remove sub-field`}
+						>
+							<Trash className="h-4 w-4 text-kumo-danger" />
+						</Button>
+					</div>
+				);
+			})}
+		</>
+	);
 }
 
 /**
@@ -829,23 +1158,16 @@ export function FieldEditor({
 			: undefined;
 	if (slugRefusal && slug === failure?.sent?.slug) problems.fields.slug = slugRefusal;
 	const hasProblems =
-		Object.keys(problems.fields).length > 0 ||
-		problems.subFields.some((subField) => subField.label || subField.slug || subField.options);
+		Object.keys(problems.fields).length > 0 || problems.subFields.some(hasSubFieldProblem);
 
 	const errors: Partial<Record<FieldInput, string>> = {};
-	const subFieldErrors: Partial<Record<SubFieldInput, string>>[] = [];
+	let shownSubFieldErrors: SubFieldErrors[] = [];
 	if (submitted) {
 		for (const key of FIELD_INPUTS) {
 			const message = unreadable.has(key) ? NOT_A_NUMBER : problems.fields[key];
 			if (message) errors[key] = t(message);
 		}
-		problems.subFields.forEach((subField, index) => {
-			subFieldErrors[index] = {
-				label: subField.label && t(subField.label),
-				slug: subField.slug && t(subField.slug),
-				options: subField.options && t(subField.options),
-			};
-		});
+		shownSubFieldErrors = problems.subFields.map((subField) => subFieldErrors(subField, t));
 	}
 
 	// Any change after a failed save came back may be the fix, so its message stops applying.
@@ -927,15 +1249,8 @@ export function FieldEditor({
 
 		if (selectedType === "repeater") {
 			if (formState.subFields.length > 0) {
-				(validation as Record<string, unknown>).subFields = formState.subFields.map((sf) => ({
-					slug: sf.slug,
-					type: sf.type,
-					label: sf.label,
-					required: sf.required || undefined,
-					...(sf.type === "select" && optionList(sf.options).length > 0
-						? { options: optionList(sf.options) }
-						: {}),
-				}));
+				(validation as Record<string, unknown>).subFields =
+					formState.subFields.map(subFieldDefinition);
 			}
 			if (formState.minItems)
 				(validation as Record<string, unknown>).minItems = wholeNumber(formState.minItems);
@@ -1586,18 +1901,7 @@ export function FieldEditor({
 												onClick={() =>
 													setFormState((prev) => ({
 														...prev,
-														subFields: [
-															...prev.subFields,
-															{
-																slug: "",
-																slugEdited: false,
-																slugPersisted: false,
-																type: "string",
-																label: "",
-																required: false,
-																options: "",
-															},
-														],
+														subFields: [...prev.subFields, newSubField()],
 													}))
 												}
 											>
@@ -1618,133 +1922,14 @@ export function FieldEditor({
 										</p>
 									)}
 
-									{formState.subFields.map((sf, i) => {
-										const subFieldErrorsAt = subFieldErrors[i] ?? {};
-										const slugUnderivableAt =
-											!sf.slug && !sf.slugEdited && sf.label.trim().length > 0;
-										return (
-											<div key={i} className="flex gap-2 items-start border rounded-lg p-3">
-												<div className="flex-1 space-y-2">
-													<div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2">
-														<Input
-															label={t`Label`}
-															className="min-w-0"
-															value={sf.label}
-															onChange={(e) => {
-																const updated = [...formState.subFields];
-																updated[i] = {
-																	...sf,
-																	label: e.target.value,
-																	...(sf.slugEdited
-																		? {}
-																		: { slug: slugifyIdentifier(e.target.value) }),
-																};
-																setFormState((prev) => ({ ...prev, subFields: updated }));
-															}}
-															placeholder={t`Field label`}
-															required
-															error={subFieldErrorsAt.label}
-															aria-invalid={subFieldErrorsAt.label ? true : undefined}
-														/>
-														<Input
-															dir="ltr"
-															label={
-																sf.slugPersisted ? (
-																	<HelpLabel
-																		help={t`Sub-field slugs cannot be changed after creation.`}
-																	>
-																		{t`Slug`}
-																	</HelpLabel>
-																) : (
-																	t`Slug`
-																)
-															}
-															aria-label={t`Slug`}
-															className="min-w-0"
-															value={sf.slug}
-															disabled={sf.slugPersisted}
-															onChange={(e) => {
-																const updated = [...formState.subFields];
-																updated[i] = {
-																	...sf,
-																	slug: e.target.value,
-																	slugEdited: true,
-																};
-																setFormState((prev) => ({ ...prev, subFields: updated }));
-															}}
-															placeholder={t`field_slug`}
-															required={!sf.slugPersisted || undefined}
-															description={
-																slugUnderivableAt
-																	? t`A slug cannot be generated from this label. Type one manually.`
-																	: undefined
-															}
-															error={subFieldErrorsAt.slug}
-															aria-invalid={subFieldErrorsAt.slug ? true : undefined}
-														/>
-														<Select
-															label={t`Type`}
-															value={sf.type}
-															onValueChange={(v) => {
-																const updated = [...formState.subFields];
-																updated[i] = { ...sf, type: v ?? "string" };
-																setFormState((prev) => ({ ...prev, subFields: updated }));
-															}}
-															items={{
-																string: t`Short Text`,
-																text: t`Long Text`,
-																number: t`Number`,
-																integer: t`Integer`,
-																boolean: t`Boolean`,
-																datetime: t`Date & Time`,
-																select: t`Select`,
-																url: t`URL`,
-																image: t`Image`,
-															}}
-														/>
-													</div>
-													{sf.type === "select" && (
-														<InputArea
-															label={t`Options (one per line)`}
-															value={sf.options}
-															onChange={(e) => {
-																const updated = [...formState.subFields];
-																updated[i] = { ...sf, options: e.target.value };
-																setFormState((prev) => ({ ...prev, subFields: updated }));
-															}}
-															placeholder={t`Option 1\nOption 2\nOption 3`}
-															rows={3}
-															required={needsOptions(sf) || undefined}
-															error={subFieldErrorsAt.options}
-															aria-invalid={subFieldErrorsAt.options ? true : undefined}
-														/>
-													)}
-													<Switch
-														label={t`Required`}
-														checked={sf.required ?? false}
-														onCheckedChange={(checked) => {
-															const updated = [...formState.subFields];
-															updated[i] = { ...sf, required: checked };
-															setFormState((prev) => ({ ...prev, subFields: updated }));
-														}}
-													/>
-												</div>
-												<Button
-													variant="ghost"
-													shape="square"
-													onClick={() =>
-														setFormState((prev) => ({
-															...prev,
-															subFields: prev.subFields.filter((_, j) => j !== i),
-														}))
-													}
-													aria-label={t`Remove sub-field`}
-												>
-													<Trash className="h-4 w-4 text-kumo-danger" />
-												</Button>
-											</div>
-										);
-									})}
+									<SubFieldCards
+										subFields={formState.subFields}
+										errors={shownSubFieldErrors}
+										enclosing={1}
+										namePrefix="sub."
+										unreadable={unreadable}
+										onChange={(next) => setFormState((prev) => ({ ...prev, subFields: next }))}
+									/>
 
 									<div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 sm:gap-4">
 										<Input

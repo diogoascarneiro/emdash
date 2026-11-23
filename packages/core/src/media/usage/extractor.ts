@@ -1,4 +1,9 @@
 import { isPortableTextVideoBlock } from "../../content/converters/video.js";
+import {
+	repeaterSubFieldPaths,
+	visitRepeaterValues,
+	type RepeaterValueLocation,
+} from "../../schema/repeater-sub-fields.js";
 import { normalizeMime } from "../mime.js";
 import { INTERNAL_MEDIA_PREFIX } from "../normalize.js";
 import { storageKeyFromLocalMediaFileUrl } from "../url.js";
@@ -83,21 +88,24 @@ function extractRepeaterOccurrences(
 ): void {
 	if (!Array.isArray(value) || !Array.isArray(subFields)) return;
 
-	for (const [itemIndex, item] of value.entries()) {
-		if (!isRecord(item)) continue;
-
-		for (const subField of subFields) {
-			if (subField.type !== "image") continue;
-
+	for (const path of repeaterSubFieldPaths(subFields, "image")) {
+		visitRepeaterValues(value, path, (row, slug, location) => {
 			addImageOccurrences(
 				occurrences,
 				seen,
 				fieldSlug,
-				`${pathPrefix}[${itemIndex}].${subField.slug}`,
-				item[subField.slug],
+				pathPrefix + bracketedRepeaterLocation(location),
+				row[slug],
 			);
-		}
+		});
 	}
+}
+
+/** `[0].products[1].image` for row 0's product 1. */
+function bracketedRepeaterLocation(location: RepeaterValueLocation): string {
+	return location
+		.map((segment) => (typeof segment === "number" ? `[${segment}]` : `.${segment}`))
+		.join("");
 }
 
 function addImageOccurrences(

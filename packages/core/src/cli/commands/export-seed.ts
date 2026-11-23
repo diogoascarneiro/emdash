@@ -29,6 +29,7 @@ import { getI18nConfig, isI18nEnabled } from "../../i18n/config.js";
 import { getMediaCaption } from "../../media/caption.js";
 import { BlockTypeRegistry } from "../../schema/block-type-registry.js";
 import { SchemaRegistry } from "../../schema/registry.js";
+import { mapRepeaterValues, repeaterSubFieldPaths } from "../../schema/repeater-sub-fields.js";
 import type { FieldType } from "../../schema/types.js";
 import type {
 	SeedFile,
@@ -1392,24 +1393,6 @@ function toSeedMedia(
 	};
 }
 
-/** Slugs of a repeater field's `image` sub-fields. */
-function repeaterImageSubFields(field: SeedField): Set<string> {
-	const subFields = field.validation?.subFields;
-	const slugs = new Set<string>();
-	if (!Array.isArray(subFields)) return slugs;
-	for (const subField of subFields) {
-		if (
-			subField &&
-			typeof subField === "object" &&
-			subField.type === "image" &&
-			typeof subField.slug === "string"
-		) {
-			slugs.add(subField.slug);
-		}
-	}
-	return slugs;
-}
-
 /**
  * Process content data for export: media values become `$media` references
  * and reference values become `$ref:` seed ids.
@@ -1434,17 +1417,13 @@ function processDataForExport(
 		if (fieldType === "image" || fieldType === "file") {
 			result[key] = toSeedMedia(value, mediaMap, mediaCounter);
 		} else if (field && fieldType === "repeater" && Array.isArray(value)) {
-			const imageSubFields = repeaterImageSubFields(field);
-			result[key] = value.map((row: unknown) => {
-				if (!row || typeof row !== "object" || Array.isArray(row)) return row;
-				const exportedRow: Record<string, unknown> = {};
-				for (const [subKey, subValue] of Object.entries(row)) {
-					exportedRow[subKey] = imageSubFields.has(subKey)
-						? toSeedMedia(subValue, mediaMap, mediaCounter)
-						: subValue;
-				}
-				return exportedRow;
-			});
+			let rows: unknown[] = value;
+			for (const path of repeaterSubFieldPaths(field.validation?.subFields, "image")) {
+				rows = mapRepeaterValues(rows, path, (subValue) =>
+					toSeedMedia(subValue, mediaMap, mediaCounter),
+				);
+			}
+			result[key] = rows;
 		} else if (fieldType === "reference") {
 			// Left for `addReferenceLinks`, which knows the seed id each entry was
 			// emitted under. A `$ref:` built here from a raw entry id resolves

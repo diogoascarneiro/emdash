@@ -161,6 +161,7 @@ import { normalizePluginCapabilities, warnDeprecatedPluginCapabilities } from ".
 import { recordSchedulerHeartbeatSafely } from "./scheduler-health.js";
 import { inferBlockTypes } from "./schema/block-values.js";
 import { primeRegisteredCollections } from "./schema/collection-slugs-cache.js";
+import { repeaterSubFieldPaths, visitRepeaterValues } from "./schema/repeater-sub-fields.js";
 import { isStoragelessField, isStoragelessFieldRow } from "./schema/types.js";
 import type { CollectionWithFields } from "./schema/types.js";
 import { AUTO_SEED_COMPLETE_OPTION } from "./seed/ownership.js";
@@ -7291,33 +7292,10 @@ export class EmDashRuntime {
 		for (const field of repeaterFields) {
 			const value = result[field.slug];
 			if (!Array.isArray(value)) continue;
-
-			const mediaSubFieldSlugs = (field.validation?.subFields ?? [])
-				.filter((sub) => sub.type === "image")
-				.map((sub) => sub.slug);
-			if (mediaSubFieldSlugs.length === 0) continue;
-
-			const items: unknown[] = value;
-			result[field.slug] = await Promise.all(
-				items.map(async (item) => {
-					if (!isRecord(item)) return item;
-					const normalizedItem: Record<string, unknown> = { ...item };
-					for (const slug of mediaSubFieldSlugs) {
-						const subValue = normalizedItem[slug];
-						if (subValue == null) continue;
-						try {
-							const normalized = await normalizeImageValue(subValue, getProvider);
-							if (normalized) {
-								normalizedItem[slug] = normalized;
-							} else if (isBlankString(subValue)) {
-								normalizedItem[slug] = null;
-							}
-						} catch {
-							// Don't fail the save if normalization fails for a single sub-field
-						}
-					}
-					return normalizedItem;
-				}),
+			result[field.slug] = await normalizeRepeaterImages(
+				value,
+				field.validation?.subFields,
+				getProvider,
 			);
 		}
 
@@ -7352,30 +7330,10 @@ export class EmDashRuntime {
 								} else if (nestedField.type === "portableText" && Array.isArray(nestedValue)) {
 									portableTextValues.push({ owner: normalizedBlock, slug: nestedField.slug });
 								} else if (nestedField.type === "repeater" && Array.isArray(nestedValue)) {
-									const imageSlugs = (nestedField.validation?.subFields ?? [])
-										.filter((subField) => subField.type === "image")
-										.map((subField) => subField.slug);
-									normalizedBlock[nestedField.slug] = await Promise.all(
-										nestedValue.map(async (item) => {
-											if (!isRecord(item)) return item;
-											const normalizedItem = { ...item };
-											for (const slug of imageSlugs) {
-												try {
-													const normalized = await normalizeImageValue(
-														normalizedItem[slug],
-														getProvider,
-													);
-													if (normalized) {
-														normalizedItem[slug] = normalized;
-													} else if (isBlankString(normalizedItem[slug])) {
-														normalizedItem[slug] = null;
-													}
-												} catch {
-													continue;
-												}
-											}
-											return normalizedItem;
-										}),
+									normalizedBlock[nestedField.slug] = await normalizeRepeaterImages(
+										nestedValue,
+										nestedField.validation?.subFields,
+										getProvider,
 									);
 								}
 							} catch {
@@ -7797,6 +7755,36 @@ export class EmDashRuntime {
 
 function isBlankString(value: unknown): boolean {
 	return typeof value === "string" && value.trim() === "";
+}
+
+/** Normalizes the image sub-fields of repeater rows, through nested repeaters. */
+async function normalizeRepeaterImages(
+	rows: unknown[],
+	subFields: unknown,
+	getProvider: (id: string) => MediaProvider | undefined,
+): Promise<unknown[]> {
+	const paths = repeaterSubFieldPaths(subFields, "image");
+	if (paths.length === 0) return rows;
+	const normalizedRows = structuredClone(rows);
+	const slots: { row: Record<string, unknown>; slug: string }[] = [];
+	for (const path of paths) {
+		visitRepeaterValues(normalizedRows, path, (row, slug) => {
+			if (row[slug] != null) slots.push({ row, slug });
+		});
+	}
+	await Promise.all(
+		slots.map(async ({ row, slug }) => {
+			const value = row[slug];
+			try {
+				const normalized = await normalizeImageValue(value, getProvider);
+				if (normalized) row[slug] = normalized;
+				else if (isBlankString(value)) row[slug] = null;
+			} catch {
+				// Don't fail the save if normalization fails for a single sub-field
+			}
+		}),
+	);
+	return normalizedRows;
 }
 
 /**

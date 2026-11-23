@@ -1,6 +1,11 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { buildMediaUsageProjectionFingerprint } from "../../../src/media/usage/projection-fingerprint.js";
+import { buildContentMediaUsageFieldFingerprint } from "../../../src/media/usage/content-fields.js";
+import {
+	buildCanonicalSha256Fingerprint,
+	buildMediaUsageProjectionFingerprint,
+} from "../../../src/media/usage/projection-fingerprint.js";
+import { CONTENT_SOURCE_SCHEMA_VERSION } from "../../../src/media/usage/types.js";
 
 const source = {
 	sourceKey: "content:posts:entry-1:columns",
@@ -71,6 +76,57 @@ it("is order-independent but changes for every projection input class", async ()
 	).not.toBe(baseline.fingerprint);
 	expect(baseline.fingerprint).toMatch(/^media-usage-projection:v1:sha256:[a-f0-9]{64}$/);
 	expect(baseline.byteLength).toBeGreaterThan(0);
+});
+
+describe("nested repeater sub-fields", () => {
+	const nested = (subFields: { slug: string; type: "image" }[]) => ({
+		slug: "sections",
+		type: "repeater" as const,
+		validation: {
+			subFields: [
+				{ slug: "photo", type: "image" as const },
+				{ slug: "items", type: "repeater" as const, subFields },
+			],
+		},
+	});
+	const flat = {
+		slug: "sections",
+		type: "repeater" as const,
+		validation: { subFields: [{ slug: "photo", type: "image" as const }] },
+	};
+
+	it("changes the projection fingerprint when a nested sub-field changes", async () => {
+		const [a, b, c] = await Promise.all([
+			fingerprint({ extractionFields: [nested([{ slug: "icon", type: "image" }])] }),
+			fingerprint({ extractionFields: [nested([{ slug: "logo", type: "image" }])] }),
+			fingerprint({ extractionFields: [flat] }),
+		]);
+		expect(a.fingerprint).not.toBe(b.fingerprint);
+		expect(a.fingerprint).not.toBe(c.fingerprint);
+	});
+
+	it("keeps the content field fingerprint of a flat repeater what it was before nesting", async () => {
+		const legacy = await buildCanonicalSha256Fingerprint("media-usage-fields:v1:sha256:", {
+			fingerprintVersion: 1,
+			contentSourceSchemaVersion: CONTENT_SOURCE_SCHEMA_VERSION,
+			extractionFields: [
+				{ slug: "sections", type: "repeater", subFields: [{ slug: "photo", type: "image" }] },
+			],
+			displayFieldSlugs: [],
+		});
+		expect(
+			await buildContentMediaUsageFieldFingerprint({
+				extractionFields: [flat],
+				displayFieldSlugs: [],
+			}),
+		).toBe(legacy.fingerprint);
+		expect(
+			await buildContentMediaUsageFieldFingerprint({
+				extractionFields: [nested([{ slug: "icon", type: "image" }])],
+				displayFieldSlugs: [],
+			}),
+		).not.toBe(legacy.fingerprint);
+	});
 });
 
 it("returns the reused UTF-8 payload length with the fingerprint", async () => {

@@ -561,6 +561,71 @@ describe("extractMediaUsageOccurrences", () => {
 		]);
 	});
 
+	it("extracts images from repeaters nested inside a block's repeater", () => {
+		const now = "2026-01-01T00:00:00.000Z";
+		const layout: MediaUsageExtractionField = {
+			slug: "layout",
+			type: "blocks",
+			blockTypes: [
+				{
+					id: "menu",
+					slug: "menu",
+					label: "Menu",
+					currentVersion: 1,
+					source: "user",
+					createdAt: now,
+					updatedAt: now,
+					versions: [
+						{
+							id: "menu-v1",
+							blockTypeId: "menu",
+							version: 1,
+							fingerprint: "v1",
+							active: true,
+							createdAt: now,
+							updatedAt: now,
+							fields: [
+								{
+									slug: "sections",
+									label: "Sections",
+									type: "repeater",
+									validation: {
+										subFields: [
+											{
+												slug: "dishes",
+												label: "Dishes",
+												type: "repeater",
+												subFields: [{ slug: "photo", label: "Photo", type: "image" }],
+											},
+										],
+									},
+								},
+							],
+						},
+					],
+				},
+			],
+		};
+
+		const occurrences = extractMediaUsageOccurrences({
+			fields: [layout],
+			data: {
+				layout: [
+					{
+						_type: "menu",
+						_version: 1,
+						_key: "k1",
+						sections: [{ dishes: [{}, { photo: { id: "dish-photo" } }] }],
+					},
+				],
+			},
+		});
+
+		expect(occurrences.map((o) => [o.fieldPath, o.mediaId])).toEqual([
+			["layout.k1.sections[0].dishes[1].photo", "dish-photo"],
+		]);
+	});
+
 	it("dedupes exact duplicate occurrence identities without collapsing repeated media uses", () => {
 		const occurrences = extractMediaUsageOccurrences({
 			fields: [

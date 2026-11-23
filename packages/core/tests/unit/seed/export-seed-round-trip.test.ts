@@ -514,6 +514,64 @@ describe("exportSeed → applySeed round trip", () => {
 			expect(post?.data.slides).toEqual([{ caption: "First", photo: expected }]);
 		});
 
+		it("exports and restores images inside nested repeater rows", async () => {
+			const { storageKey } = await createMediaSite();
+			await new SchemaRegistry(db).createField("posts", {
+				slug: "categories",
+				label: "Categories",
+				type: "repeater",
+				validation: {
+					subFields: [
+						{ slug: "label", label: "Label", type: "string" },
+						{
+							slug: "products",
+							label: "Products",
+							type: "repeater",
+							subFields: [
+								{ slug: "name", label: "Name", type: "string" },
+								{ slug: "photo", label: "Photo", type: "image" },
+							],
+						},
+					],
+				},
+			});
+			const contentRepo = new ContentRepository(db);
+			const post = await contentRepo.findBySlug("posts", "hello");
+			if (!post) throw new Error("Expected post fixture");
+			const slides = post.data.slides as Array<{ photo: unknown }>;
+			await contentRepo.update("posts", post.id, {
+				data: {
+					...post.data,
+					categories: [
+						{ label: "Empty", products: [{ name: "No photo" }] },
+						{ label: "Full", products: [{ name: "A", photo: slides[0]!.photo }] },
+					],
+				},
+			});
+
+			const seed = await exportSeed(db, "all", { mediaBaseUrl: MEDIA_BASE_URL });
+
+			const categories = seed.content?.posts?.[0]?.data.categories as Array<{
+				products: Array<{ name: string; photo?: unknown }>;
+			}>;
+			expect(categories[0]!.products[0]).toEqual({ name: "No photo" });
+			expect(categories[1]!.products[0]!.photo).toEqual({
+				$media: expect.objectContaining({
+					url: `${MEDIA_BASE_URL}/_emdash/api/media/file/${storageKey}`,
+				}),
+			});
+
+			await applyToFreshDatabase(seed, async (restored) => {
+				const restoredPost = await new ContentRepository(restored).findBySlug("posts", "hello");
+				const media = await restored.selectFrom("media").select("id").execute();
+				const restoredCategories = restoredPost?.data.categories as typeof categories;
+				expect(restoredCategories[0]!.products[0]).toEqual({ name: "No photo" });
+				expect(new Set(media.map((m) => m.id))).toContain(
+					(restoredCategories[1]!.products[0]!.photo as { id?: string }).id,
+				);
+			});
+		});
+
 		it("exports legacy meta captions, including an explicit empty caption", async () => {
 			const { storageKey } = await createMediaSite();
 			const media = await db

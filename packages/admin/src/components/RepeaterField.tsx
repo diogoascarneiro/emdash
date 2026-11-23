@@ -31,6 +31,10 @@ interface RepeaterSubFieldDef {
 	label: string;
 	required?: boolean;
 	options?: string[];
+	/** A nested repeater's own sub-fields. */
+	subFields?: RepeaterSubFieldDef[];
+	minItems?: number;
+	maxItems?: number;
 }
 
 export interface RepeaterFieldProps {
@@ -103,16 +107,18 @@ export function RepeaterField({
 		const newItem: RepeaterItem = { _key: `item-${Date.now()}` };
 		for (const sf of subFields) {
 			newItem[sf.slug] =
-				sf.type === "boolean"
-					? false
-					: sf.type === "number" ||
-						  sf.type === "integer" ||
-						  sf.type === "image" ||
-						  sf.type === "datetime" ||
-						  sf.type === "select" ||
-						  sf.type === "url"
-						? null
-						: "";
+				sf.type === "repeater"
+					? []
+					: sf.type === "boolean"
+						? false
+						: sf.type === "number" ||
+							  sf.type === "integer" ||
+							  sf.type === "image" ||
+							  sf.type === "datetime" ||
+							  sf.type === "select" ||
+							  sf.type === "url"
+							? null
+							: "";
 		}
 		emitChange([...items, newItem]);
 	};
@@ -412,6 +418,20 @@ function SubFieldInput({ id, subField, value, onChange, timezone }: SubFieldInpu
 				</Combobox>
 			);
 		}
+		case "repeater":
+			return (
+				<RepeaterField
+					id={id}
+					label={subField.label}
+					value={value}
+					onChange={onChange}
+					required={subField.required}
+					subFields={subField.subFields ?? []}
+					minItems={subField.minItems}
+					maxItems={subField.maxItems}
+					timezone={timezone}
+				/>
+			);
 		case "image":
 			return (
 				<ImageFieldRenderer

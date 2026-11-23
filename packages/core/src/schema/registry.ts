@@ -52,6 +52,11 @@ import type {
 } from "../transfer/schema-importer.js";
 import { chunks, SQL_BATCH_SIZE } from "../utils/chunks.js";
 import { resetRegisteredCollectionsCache } from "./collection-slugs-cache.js";
+import {
+	findUnsupportedRepeaterSubFieldType,
+	repeaterListTypeChanges,
+	repeaterSubFieldIssues,
+} from "./repeater-sub-fields.js";
 import { MAX_SCHEMA_SLUG_LENGTH, SCHEMA_SLUG_PATTERN } from "./slug.js";
 import {
 	type Collection,
@@ -69,7 +74,6 @@ import {
 	type CollectionWithFields,
 	type FieldType,
 	FIELD_TYPE_TO_COLUMN,
-	REPEATER_SUB_FIELD_TYPES,
 	isIndexableFieldType,
 	isStoragelessField,
 	RESERVED_FIELD_SLUGS,
@@ -115,24 +119,25 @@ function isColumnType(value: string): value is ColumnType {
 	return COLUMN_TYPES.has(value);
 }
 
-const REPEATER_SUB_FIELD_TYPE_SET: ReadonlySet<string> = new Set(REPEATER_SUB_FIELD_TYPES);
-
-function findUnsupportedRepeaterSubFieldType(
-	validation: unknown,
-): UnsupportedFieldType | undefined {
-	if (!validation || typeof validation !== "object") return undefined;
-	const subFields = "subFields" in validation ? validation.subFields : undefined;
-	if (!Array.isArray(subFields)) return undefined;
-
-	for (const [index, subField] of subFields.entries()) {
-		if (!subField || typeof subField !== "object") continue;
-		const type = "type" in subField ? subField.type : undefined;
-		if (typeof type === "string" && !REPEATER_SUB_FIELD_TYPE_SET.has(type)) {
-			return { type, path: `validation.subFields[${index}].type` };
-		}
+function findUnsupportedRepeaterValidation(validation: unknown): UnsupportedFieldType | undefined {
+	if (!validation || typeof validation !== "object" || !("subFields" in validation)) {
+		return undefined;
 	}
+	return findUnsupportedRepeaterSubFieldType(validation.subFields, "validation.subFields");
+}
 
-	return undefined;
+/** Rejects nested repeater sub-fields this runtime cannot store. Single-value sub-fields keep their old leniency. */
+function assertNestedRepeaterSubFields(validation: FieldValidation | null | undefined): void {
+	const subFields = validation?.subFields;
+	if (!Array.isArray(subFields) || subFields.length === 0) return;
+	const [issue] = repeaterSubFieldIssues(subFields, "validation.subFields", {
+		lenientScalars: true,
+	});
+	if (issue) {
+		throw new SchemaError(`${issue.path}: ${issue.message}`, "VALIDATION_ERROR", {
+			path: issue.path,
+		});
+	}
 }
 
 const VALID_COLLECTION_SUPPORTS: ReadonlySet<string> = new Set<CollectionSupport>([
@@ -670,6 +675,7 @@ export class SchemaRegistry {
 				);
 			}
 			fieldSlugs.add(field.slug);
+			if (field.type === "repeater") assertNestedRepeaterSubFields(field.validation);
 			normalizedFields.push(
 				field.type === "blocks"
 					? {
@@ -1313,6 +1319,7 @@ export class SchemaRegistry {
 			);
 		}
 
+		if (input.type === "repeater") assertNestedRepeaterSubFields(input.validation);
 		const id = ulid();
 		const validation =
 			input.type === "blocks"
@@ -1495,6 +1502,21 @@ export class SchemaRegistry {
 						: input.validation !== undefined
 							? input.validation
 							: field.validation;
+				if ((input.type ?? field.type) === "repeater" && input.validation !== undefined) {
+					assertNestedRepeaterSubFields(input.validation);
+					const [changed] = repeaterListTypeChanges(
+						field.validation?.subFields,
+						input.validation?.subFields,
+					);
+					if (changed) {
+						throw new SchemaError(
+							`Cannot change sub-field "${changed}" of field "${fieldSlug}" in collection "${collectionSlug}" ` +
+								"between a single value and a list: stored rows would no longer match. " +
+								"Add a new sub-field instead.",
+							"FIELD_TYPE_CHANGE_REQUIRES_MIGRATION",
+						);
+					}
+				}
 
 				if (input.type !== undefined && input.type !== field.type) {
 					// A change into or out of storage-less is never a no-op column change:
@@ -2507,7 +2529,7 @@ export class SchemaRegistry {
 		const validation = row.validation ? JSON.parse(row.validation) : undefined;
 		const unsupportedType = isFieldType(row.type)
 			? row.type === "repeater"
-				? findUnsupportedRepeaterSubFieldType(validation)
+				? findUnsupportedRepeaterValidation(validation)
 				: undefined
 			: { type: row.type, path: "type" };
 		return {

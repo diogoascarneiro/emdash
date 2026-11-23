@@ -1049,6 +1049,111 @@ describe("FieldEditor", () => {
 				onSave.mock.calls[0]?.[0].validation.subFields.map((sf: { slug: string }) => sf.slug),
 			).toEqual(["groesse", "summary"]);
 		});
+
+		it("keeps a nested repeater's definition when the field is saved, and its type fixed", async () => {
+			const onSave = vi.fn();
+			const products = {
+				slug: "products",
+				label: "Products",
+				type: "repeater",
+				maxItems: 5,
+				subFields: [{ slug: "name", label: "Name", type: "string" }],
+			};
+			const field = makeField({
+				slug: "categories",
+				label: "Categories",
+				type: "repeater",
+				validation: { subFields: [products] } as SchemaField["validation"],
+			});
+			const screen = await renderInRouter(
+				<FieldEditor {...defaultProps} field={field} onSave={onSave} />,
+			);
+			await expect.element(screen.getByRole("combobox", { name: "Type" }).first()).toBeDisabled();
+			await screen.getByLabelText("Label", { exact: true }).nth(1).fill("Items");
+			screen.getByRole("button", { name: "Update Field" }).element().click();
+			expect(onSave.mock.calls[0]?.[0].validation.subFields).toEqual([
+				{ ...products, label: "Items", required: undefined },
+			]);
+		});
+
+		async function startNestedRepeater(onSave: ReturnType<typeof vi.fn>) {
+			const screen = await renderInRouter(<FieldEditor {...defaultProps} onSave={onSave} />);
+			screen
+				.getByRole("button", { name: /^Repeater/ })
+				.element()
+				.click();
+			await screen.getByLabelText("Label", { exact: true }).fill("Categories");
+			screen.getByRole("button", { name: "Add Sub-Field", exact: true }).element().click();
+			await screen.getByLabelText("Label", { exact: true }).nth(1).fill("Products");
+			await screen.getByRole("combobox", { name: "Type" }).click();
+			await screen.getByRole("option", { name: "Repeater" }).click();
+			return screen;
+		}
+
+		it("creates a repeater sub-field with its own sub-fields and limits", async () => {
+			const onSave = vi.fn();
+			const screen = await startNestedRepeater(onSave);
+			screen.getByRole("button", { name: "Add sub-field to Products" }).element().click();
+			await screen.getByLabelText("Label", { exact: true }).nth(2).fill("Name");
+			await screen.getByLabelText("Max Items").first().fill("4");
+			screen.getByRole("button", { name: "Add Field" }).element().click();
+			expect(onSave.mock.calls[0]?.[0].validation.subFields).toEqual([
+				{
+					slug: "products",
+					label: "Products",
+					type: "repeater",
+					required: undefined,
+					maxItems: 4,
+					subFields: [{ slug: "name", label: "Name", type: "string", required: undefined }],
+				},
+			]);
+		});
+
+		it("holds back a nested list that has no sub-fields", async () => {
+			const onSave = vi.fn();
+			const screen = await startNestedRepeater(onSave);
+			screen.getByRole("button", { name: "Add Field" }).element().click();
+			await expect
+				.element(screen.getByText("Add at least one sub-field to this list."))
+				.toBeVisible();
+			expect(onSave).not.toHaveBeenCalled();
+		});
+
+		it("focuses a nested list's Add Sub-Field button when it has no sub-fields", async () => {
+			const onSave = vi.fn();
+			const screen = await startNestedRepeater(onSave);
+			screen.getByRole("button", { name: "Add Field" }).element().click();
+			await expect
+				.element(screen.getByRole("button", { name: "Add sub-field to Products" }))
+				.toHaveFocus();
+		});
+
+		it("says when a nested list's limit is not a number, and keeps the field unsaved", async () => {
+			const onSave = vi.fn();
+			const screen = await startNestedRepeater(onSave);
+			screen.getByRole("button", { name: "Add sub-field to Products" }).element().click();
+			await screen.getByLabelText("Label", { exact: true }).nth(2).fill("Name");
+			const max = screen.getByLabelText("Max Items").first();
+			(max.element() as HTMLInputElement).focus();
+			await userEvent.keyboard("e");
+			screen.getByRole("button", { name: "Add Field" }).element().click();
+			await expect.element(max).toHaveAttribute("aria-invalid", "true");
+			await expect.element(screen.getByText("Enter a number.").first()).toBeVisible();
+			expect(onSave).not.toHaveBeenCalled();
+		});
+
+		it("offers Repeater for two levels of nesting and not a third", async () => {
+			const onSave = vi.fn();
+			const screen = await startNestedRepeater(onSave);
+			screen.getByRole("button", { name: "Add sub-field to Products" }).element().click();
+			await screen.getByLabelText("Label", { exact: true }).nth(2).fill("Rates");
+			await screen.getByRole("combobox", { name: "Type" }).nth(1).click();
+			await screen.getByRole("option", { name: "Repeater" }).click();
+			screen.getByRole("button", { name: "Add sub-field to Rates" }).element().click();
+			await screen.getByRole("combobox", { name: "Type" }).nth(2).click();
+			await expect.element(screen.getByRole("option", { name: "Image" })).toBeVisible();
+			expect(screen.getByRole("option", { name: "Repeater" }).query()).toBeNull();
+		});
 	});
 
 	describe("repeater select sub-field options", () => {

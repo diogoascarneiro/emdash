@@ -23,6 +23,8 @@ export interface MediaUsageExtractionSubField {
 	slug: string;
 	type: FieldType;
 	label?: string;
+	/** A nested repeater's own sub-fields. */
+	subFields?: readonly MediaUsageExtractionSubField[];
 }
 
 export interface MediaUsageExtractionValidation {

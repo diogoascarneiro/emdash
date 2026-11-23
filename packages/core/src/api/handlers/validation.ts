@@ -20,7 +20,7 @@ import type { z } from "zod";
 import type { Database } from "../../database/types.js";
 import { validateIdentifier } from "../../database/validate.js";
 import { SchemaRegistry } from "../../schema/registry.js";
-import type { Field } from "../../schema/types.js";
+import type { Field, RepeaterSubField } from "../../schema/types.js";
 import { generateZodSchema } from "../../schema/zod-generator.js";
 import { chunks, SQL_BATCH_SIZE } from "../../utils/chunks.js";
 import { isMissingTableError } from "../../utils/db-errors.js";
@@ -85,23 +85,34 @@ function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
 	return path.map((seg) => String(seg)).join(".");
 }
 
+/** Whether `path` names a sub-field value, as in `faqs.0.question` or `groups.0.links.1.url`. */
 function isSubFieldPath(
 	path: ReadonlyArray<PropertyKey>,
-	fieldTypes: ReadonlyMap<string, string>,
+	fields: ReadonlyMap<string, Field>,
 ): boolean {
-	return path.length === 3 && fieldTypes.get(String(path[0])) === "repeater";
+	const field = fields.get(String(path[0]));
+	if (field?.type !== "repeater") return false;
+	let subFields: readonly RepeaterSubField[] = field.validation?.subFields ?? [];
+	for (let at = 2; at < path.length; at += 2) {
+		const subField = subFields.find((candidate) => candidate.slug === path[at]);
+		if (!subField) return false;
+		if (at === path.length - 1) return true;
+		if (subField.type !== "repeater") return false;
+		subFields = subField.subFields;
+	}
+	return false;
 }
 
 function isFieldOrSubFieldPath(
 	path: ReadonlyArray<PropertyKey>,
-	fieldTypes: ReadonlyMap<string, string>,
+	fields: ReadonlyMap<string, Field>,
 ): boolean {
-	return path.length === 1 || isSubFieldPath(path, fieldTypes);
+	return path.length === 1 || isSubFieldPath(path, fields);
 }
 
 function fromZodIssue(
 	issue: z.core.$ZodIssue,
-	fieldTypes: ReadonlyMap<string, string>,
+	fields: ReadonlyMap<string, Field>,
 ): ContentValidationIssue {
 	const result: ContentValidationIssue = {
 		path: formatIssuePath(issue.path),
@@ -115,7 +126,7 @@ function fromZodIssue(
 			// Zod reports a missing or null value as a type, union or option
 			// mismatch. A key missing inside a value, such as a Portable Text
 			// block's `_type`, leaves the value malformed rather than the field empty.
-			if (issue.input == null && isFieldOrSubFieldPath(issue.path, fieldTypes)) {
+			if (issue.input == null && isFieldOrSubFieldPath(issue.path, fields)) {
 				result.code = "required";
 			}
 			break;
@@ -123,7 +134,7 @@ function fromZodIssue(
 			result.origin = issue.origin;
 			if (typeof issue.minimum === "number") result.minimum = issue.minimum;
 			// A required repeater sub-field rejects "" as a one-character minimum.
-			if (issue.input === "" && isSubFieldPath(issue.path, fieldTypes)) {
+			if (issue.input === "" && isSubFieldPath(issue.path, fields)) {
 				result.code = "required";
 			}
 			break;
@@ -200,9 +211,9 @@ export async function validateContentData(
 	const schema = options.partial ? baseSchema.partial() : baseSchema;
 	const parsed = schema.safeParse(data, { reportInput: true });
 	if (!parsed.success) {
-		const fieldTypes = new Map(collectionWithFields.fields.map((f) => [f.slug, f.type]));
+		const fields = new Map(collectionWithFields.fields.map((f) => [f.slug, f]));
 		for (const issue of parsed.error.issues) {
-			issues.push(fromZodIssue(issue, fieldTypes));
+			issues.push(fromZodIssue(issue, fields));
 		}
 	}
 

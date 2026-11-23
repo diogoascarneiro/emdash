@@ -27,6 +27,7 @@ import { z } from "zod";
 
 import type { Database } from "../../database/types.js";
 import { MAX_SELECT_OPTIONS } from "../../schema/byline-registry.js";
+import { repeaterSubFieldPaths } from "../../schema/repeater-sub-fields.js";
 import {
 	BYLINE_FIELD_TYPES,
 	FIELD_TYPE_TO_COLUMN,
@@ -921,13 +922,7 @@ function selectOptions(validation: unknown): string[] {
 
 function repeaterUrlSubFields(validation: unknown): string[] {
 	if (typeof validation !== "object" || validation === null || Array.isArray(validation)) return [];
-	const subFields: unknown = Reflect.get(validation, "subFields");
-	if (!Array.isArray(subFields)) return [];
-	return subFields.flatMap((field) => {
-		if (typeof field !== "object" || field === null || Array.isArray(field)) return [];
-		const slug: unknown = Reflect.get(field, "slug");
-		return Reflect.get(field, "type") === "url" && typeof slug === "string" ? [slug] : [];
-	});
+	return repeaterSubFieldPaths(Reflect.get(validation, "subFields"), "url");
 }
 
 function urlValueFields(fields: readonly unknown[]): UrlValueField[] {

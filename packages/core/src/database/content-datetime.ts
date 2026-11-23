@@ -7,7 +7,12 @@ import {
 	type DatetimeFieldDescriptor,
 } from "../datetime-normalization.js";
 import { requestCached } from "../request-cache.js";
-import { isStoragelessFieldRow, type FieldType, type RepeaterSubField } from "../schema/types.js";
+import {
+	dottedRepeaterLocation,
+	repeaterSubFieldPaths,
+	visitRepeaterValues,
+} from "../schema/repeater-sub-fields.js";
+import { isStoragelessFieldRow, type FieldType } from "../schema/types.js";
 import { isSafeUrlFieldWriteValue } from "../utils/url.js";
 import { EmDashValidationError } from "./repositories/types.js";
 import type { Database } from "./types.js";
@@ -33,19 +38,7 @@ function repeaterSubFieldsOfType(validation: string | null, type: FieldType): st
 		return [];
 	}
 	if (typeof parsed !== "object" || parsed === null || !("subFields" in parsed)) return [];
-	const subFields = (parsed as { subFields?: unknown }).subFields;
-	if (!Array.isArray(subFields)) return [];
-	return subFields
-		.filter(
-			(field): field is RepeaterSubField =>
-				typeof field === "object" &&
-				field !== null &&
-				"type" in field &&
-				field.type === type &&
-				"slug" in field &&
-				typeof field.slug === "string",
-		)
-		.map((field) => field.slug);
+	return repeaterSubFieldPaths(parsed.subFields, type);
 }
 
 /**
@@ -186,10 +179,6 @@ export class ContentDatetimeNormalizer {
 	}
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // Reads parse a stored string that looks like JSON, so a repeater written as a JSON string
 // comes back as rows and must be checked as rows.
 function repeaterRows(value: unknown): unknown[] | undefined {
@@ -225,11 +214,10 @@ function assertSafeUrlFields(
 		}
 		const rows = repeaterRows(value);
 		if (!rows) continue;
-		for (const [index, row] of rows.entries()) {
-			if (!isRecord(row)) continue;
-			for (const subField of field.urlSubFields) {
-				assertSafeUrl(`${field.slug}.${index}.${subField}`, row[subField]);
-			}
+		for (const path of field.urlSubFields) {
+			visitRepeaterValues(rows, path, (row, slug, location) => {
+				assertSafeUrl(dottedRepeaterLocation(field.slug, location), row[slug]);
+			});
 		}
 	}
 }

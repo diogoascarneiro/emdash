@@ -150,3 +150,84 @@ describe("block type contracts", () => {
 		).toThrow(/fields\[0\]\.validation\.subFields\[0\]\.type/);
 	});
 });
+
+describe("block type contracts with nested repeaters", () => {
+	function rateCards(rates: Record<string, unknown>): BlockFieldDefinition[] {
+		return [
+			{
+				slug: "categories",
+				label: "Categories",
+				type: "repeater",
+				validation: {
+					subFields: [
+						{ slug: "label", label: "Label", type: "string" },
+						{
+							slug: "products",
+							label: "Products",
+							type: "repeater",
+							subFields: [
+								{ slug: "name", label: "Name", type: "string" },
+								// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately loose test input
+								rates as never,
+							],
+						},
+					],
+				},
+			},
+		];
+	}
+	const rates = {
+		slug: "rates",
+		label: "Rates",
+		type: "repeater",
+		subFields: [{ slug: "unit", label: "Unit", type: "select", options: ["GB", "TB"] }],
+	};
+
+	it("accepts two nested levels", () => {
+		expect(() => validateBlockFields(rateCards(rates))).not.toThrow();
+	});
+
+	it("rejects a third level at its type with the nesting limit", () => {
+		expect(() =>
+			validateBlockFields(
+				rateCards({
+					...rates,
+					subFields: [{ slug: "tiers", label: "Tiers", type: "repeater", subFields: [] }],
+				}),
+			),
+		).toThrow(
+			"fields[0].validation.subFields[1].subFields[1].subFields[0].type: Repeaters can be nested only 2 levels deep",
+		);
+	});
+
+	it("compares nested definitions instead of treating them as unchanged", () => {
+		const narrowed = compareBlockFields(
+			rateCards(rates),
+			rateCards({ ...rates, subFields: [{ ...rates.subFields[0], options: ["GB"] }] }),
+		);
+		expect(narrowed.compatible).toBe(false);
+		expect(narrowed.differences).toEqual([
+			{
+				path: "fields.categories.validation.subFields.products.validation.subFields.rates.validation.subFields.unit.validation.options",
+				change: "allowed values changed",
+				compatibility: "breaking",
+			},
+		]);
+
+		const added = compareBlockFields(
+			rateCards(rates),
+			rateCards({
+				...rates,
+				subFields: [...rates.subFields, { slug: "note", label: "Note", type: "string" }],
+			}),
+		);
+		expect(added.compatible).toBe(true);
+		expect(added.differences).toHaveLength(1);
+	});
+
+	it("fingerprints a change inside a nested repeater", async () => {
+		expect(await fingerprintBlockFields(rateCards({ ...rates, maxItems: 3 }))).not.toBe(
+			await fingerprintBlockFields(rateCards(rates)),
+		);
+	});
+});

@@ -8,6 +8,7 @@ import { getI18nConfig, resolveConfiguredLocale } from "../i18n/config.js";
 import { isSiteRelativeDestination } from "../redirects/destination.js";
 import { isPattern, validateDestinationParams, validatePattern } from "../redirects/patterns.js";
 import { validateBlockFields } from "../schema/block-type-contract.js";
+import { repeaterSubFieldIssues } from "../schema/repeater-sub-fields.js";
 import {
 	FIELD_TYPES,
 	isIndexableFieldType,
@@ -356,6 +357,12 @@ export function validateSeed(data: unknown): ValidationResult {
 								warnings.push(
 									`${fieldPrefix}.validation.subFields: repeater needs a non-empty array of sub-fields, so its rows have nothing to edit`,
 								);
+							} else {
+								for (const issue of repeaterSubFieldIssues(subFields, "validation.subFields", {
+									lenientScalars: true,
+								})) {
+									errors.push(`${fieldPrefix}.${issue.path}: ${issue.message}`);
+								}
 							}
 						}
 					}

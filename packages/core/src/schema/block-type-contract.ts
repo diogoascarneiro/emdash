@@ -6,7 +6,8 @@ import {
 	type BlockTypeDifference,
 } from "./block-types.js";
 import { SchemaError } from "./registry.js";
-import { REPEATER_SUB_FIELD_TYPES, type RepeaterSubField } from "./types.js";
+import { repeaterSubFieldAsField, repeaterSubFieldIssues } from "./repeater-sub-fields.js";
+import type { RepeaterSubField } from "./types.js";
 
 const SLUG_PATTERN = /^[a-z][a-z0-9_]*$/;
 const MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_+\-.]*\/[a-z0-9!#$&^_+\-.]*$/i;
@@ -14,7 +15,6 @@ const MAX_SLUG_LENGTH = 63;
 const MAX_LABEL_LENGTH = 200;
 const RESERVED_VALUE_KEYS: ReadonlySet<string> = new Set(["_type", "_version", "_key"]);
 const BLOCK_FIELD_TYPE_SET: ReadonlySet<string> = new Set(BLOCK_FIELD_TYPES);
-const REPEATER_TYPE_SET: ReadonlySet<string> = new Set(REPEATER_SUB_FIELD_TYPES);
 
 const VALIDATION_KEYS: Record<BlockFieldType, ReadonlySet<string>> = {
 	string: new Set(["minLength", "maxLength", "pattern"]),
@@ -89,33 +89,8 @@ function validateRepeaterSubFields(
 	value: unknown,
 	path: string,
 ): asserts value is RepeaterSubField[] {
-	if (!Array.isArray(value) || value.length === 0) fail(path, "must be a non-empty array");
-	const slugs = new Set<string>();
-	for (const [index, subField] of value.entries()) {
-		const fieldPath = `${path}[${index}]`;
-		if (!subField || typeof subField !== "object" || Array.isArray(subField)) {
-			fail(fieldPath, "must be an object");
-		}
-		const slug = "slug" in subField ? subField.slug : undefined;
-		assertSlug(slug, `${fieldPath}.slug`);
-		if (RESERVED_VALUE_KEYS.has(slug)) fail(`${fieldPath}.slug`, `"${slug}" is reserved`);
-		if (slugs.has(slug)) fail(`${fieldPath}.slug`, `duplicate slug "${slug}"`);
-		slugs.add(slug);
-		const label = "label" in subField ? subField.label : undefined;
-		assertLabel(label, `${fieldPath}.label`);
-		const type = "type" in subField ? subField.type : undefined;
-		if (typeof type !== "string" || !REPEATER_TYPE_SET.has(type)) {
-			fail(`${fieldPath}.type`, `unsupported repeater field type "${String(type)}"`);
-		}
-		const options = "options" in subField ? subField.options : undefined;
-		if (type === "select") validateOptions(options, `${fieldPath}.options`);
-		else if (options !== undefined)
-			fail(`${fieldPath}.options`, `is not supported for type "${type}"`);
-		const required = "required" in subField ? subField.required : undefined;
-		if (required !== undefined && typeof required !== "boolean") {
-			fail(`${fieldPath}.required`, "must be a boolean");
-		}
-	}
+	const [issue] = repeaterSubFieldIssues(value, path);
+	if (issue) fail(issue.path, issue.message);
 }
 
 function validateValidation(field: BlockFieldDefinition, path: string): void {
@@ -340,13 +315,16 @@ function compareSet(
 }
 
 function repeaterFields(fields: readonly RepeaterSubField[] | undefined): BlockFieldDefinition[] {
-	return (fields ?? []).map((field) => ({
-		slug: field.slug,
-		label: field.label,
-		type: field.type,
-		required: field.required,
-		...(field.options ? { validation: { options: field.options } } : {}),
-	}));
+	return (fields ?? []).map((field) => {
+		const { type, validation } = repeaterSubFieldAsField(field);
+		return {
+			slug: field.slug,
+			label: field.label,
+			type,
+			required: field.required,
+			...(validation ? { validation } : {}),
+		};
+	});
 }
 
 function compareValidation(

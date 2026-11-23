@@ -24,6 +24,7 @@ import {
 	createBlockTypeBody,
 	createCollectionBody,
 	createTaxonomyDefBody,
+	repeaterSubFieldSchema,
 	updateCollectionBody,
 	updateBlockTypeBody,
 	updateFieldBody,
@@ -2552,8 +2553,11 @@ export function createMcpServer(
 				"database table. Field types: string (short text), text (long text), " +
 				"number (decimal), integer, boolean, datetime, select (single choice), " +
 				"multiSelect (multiple), portableText (rich text), image, file, " +
-				"reference (link to another collection), json, slug (URL-safe id), or blocks. " +
-				"For select/multiSelect, provide choices in validation.options array.",
+				"reference (link to another collection), json, slug (URL-safe id), repeater " +
+				"(a list of rows), or blocks. For select/multiSelect, provide choices in " +
+				"validation.options array. For repeater, define each row's fields in " +
+				"validation.subFields; a sub-field of type repeater holds its own list, up to " +
+				"2 levels deep.",
 			inputSchema: z.object({
 				collection: z.string().describe("Collection slug to add the field to"),
 				slug: z
@@ -2577,6 +2581,7 @@ export function createMcpServer(
 						"reference",
 						"json",
 						"slug",
+						"repeater",
 						"blocks",
 					])
 					.describe("Data type for this field"),
@@ -2598,6 +2603,11 @@ export function createMcpServer(
 							.array(z.string())
 							.optional()
 							.describe("Ordered block type slugs allowed by a blocks field"),
+						subFields: z
+							.array(repeaterSubFieldSchema)
+							.min(1)
+							.optional()
+							.describe("Row fields for a repeater"),
 						minItems: z.number().int().min(0).optional(),
 						maxItems: z.number().int().min(1).optional(),
 					})

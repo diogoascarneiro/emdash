@@ -167,25 +167,38 @@ export type CollectionSource =
 /**
  * Validation rules for a field
  */
-/** Sub-field definition for repeater fields */
-export interface RepeaterSubField {
+/** A repeater sub-field that holds a single value */
+export interface ScalarRepeaterSubField {
 	slug: string;
-	type:
-		| "string"
-		| "text"
-		| "url"
-		| "number"
-		| "integer"
-		| "boolean"
-		| "datetime"
-		| "select"
-		| "image";
+	type: (typeof REPEATER_SUB_FIELD_TYPES)[number];
 	label: string;
 	required?: boolean;
 	options?: string[]; // For select sub-fields
 }
 
-/** Allowed types for repeater sub-fields (no nesting, no complex types) */
+/** A repeater sub-field that holds its own list of rows */
+export interface RepeaterListSubField<TSubField = RepeaterSubField> {
+	slug: string;
+	type: "repeater";
+	label: string;
+	required?: boolean;
+	subFields: TSubField[];
+	minItems?: number;
+	maxItems?: number;
+}
+
+/** A list two levels inside a repeater field. Its own sub-fields must be scalar. */
+export type InnermostRepeaterSubField = RepeaterListSubField<ScalarRepeaterSubField>;
+
+/** A list inside a repeater field's rows. It can hold one more level of list. */
+export type NestedRepeaterSubField = RepeaterListSubField<
+	ScalarRepeaterSubField | InnermostRepeaterSubField
+>;
+
+/** Sub-field definition for repeater fields */
+export type RepeaterSubField = ScalarRepeaterSubField | NestedRepeaterSubField;
+
+/** Single-value types allowed for repeater sub-fields. A sub-field can also be a nested `repeater`. */
 export const REPEATER_SUB_FIELD_TYPES = [
 	"string",
 	"text",

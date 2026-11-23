@@ -3,6 +3,7 @@ import { z, type ZodType } from "zod";
 import { hashString } from "../utils/hash.js";
 import { isSafeUrlFieldValue } from "../utils/url.js";
 import type { BlockFieldDefinition } from "./block-types.js";
+import { repeaterSubFieldAsField } from "./repeater-sub-fields.js";
 import {
 	isStoragelessField,
 	type CollectionWithFields,
@@ -218,9 +219,9 @@ function generateRepeaterRowSchema(
 	const shape: Record<string, ZodType> = {};
 
 	for (const subField of subFields) {
-		let schema = getBaseSchema(subField.type, {
-			validation: subField.options ? { options: subField.options } : undefined,
-		});
+		const definition = repeaterSubFieldAsField(subField);
+		let schema = getBaseSchema(definition.type, definition);
+		if (definition.type === "repeater") schema = applyValidation(schema, definition);
 
 		if (subField.required && schema instanceof z.ZodString) {
 			schema = schema.min(1, "required (empty value not allowed)");
@@ -620,10 +621,7 @@ function fieldTypeToTypeScript(field: {
 			const members = new Map<string, string>();
 
 			for (const subField of subFields) {
-				const type = fieldTypeToTypeScript({
-					type: subField.type,
-					validation: subField.options ? { options: subField.options } : undefined,
-				});
+				const type = fieldTypeToTypeScript(repeaterSubFieldAsField(subField));
 				// A sub-field slug is not guaranteed to be a valid identifier, so it is
 				// quoted rather than emitted bare.
 				const name = JSON.stringify(subField.slug);

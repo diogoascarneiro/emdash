@@ -492,6 +492,70 @@ describeEachDialect("site import analysis: values the site's write paths refuse"
 			);
 		});
 
+		it("blocks unsafe URLs in nested repeater rows with their full path", async () => {
+			const nestedLinks = (sub: unknown) => ({
+				slug: "links",
+				type: "repeater",
+				label: "Links",
+				subFields: sub,
+			});
+			const hrefs = [{ slug: "href", type: "url", label: "Href" }];
+			const plan = await planFor({
+				mutate: (records) => {
+					update<FieldRecord>(records.field, ids.postGallery, (field) => ({
+						...field,
+						validation: {
+							subFields: [
+								{ slug: "caption", type: "string", label: "Caption" },
+								nestedLinks(hrefs),
+							],
+						},
+					}));
+					update<BlockTypeVersionRecord>(records.block_type_version, ids.calloutV2, (version) => ({
+						...version,
+						fields: [
+							...version.fields,
+							{
+								slug: "groups",
+								label: "Groups",
+								type: "repeater",
+								validation: { subFields: [nestedLinks(hrefs)] },
+							},
+						],
+					}));
+					const unsafeFields = (fields: unknown) => ({
+						...(typeof fields === "object" && fields !== null && !Array.isArray(fields)
+							? fields
+							: {}),
+						gallery: [
+							{ links: [{ href: "https://ok.example" }] },
+							{ links: [{ href: "https://ok.example" }, { href: "\t//evil.example/path" }] },
+						],
+						blocks: [
+							{
+								_type: "callout",
+								_version: 2,
+								_key: "unsafe",
+								groups: [{ links: [{ href: "//evil.example" }] }],
+							},
+						],
+					});
+					update<EntryRecord>(records.entry, ids.hello, (entry) => ({
+						...entry,
+						fields: unsafeFields(entry.fields),
+					}));
+				},
+			});
+
+			const unsafe = plan.blockers
+				.filter((blocker) => blocker.code === "value_constraint_violation")
+				.map((blocker) => blocker.detail?.field);
+			expect(unsafe).toEqual(
+				expect.arrayContaining(["gallery.1.links.1.href", "blocks.0.groups.0.links.0.href"]),
+			);
+			expect(unsafe).not.toContain("gallery.0.links.0.href");
+		});
+
 		it("blocks URLs and URL patterns the admin API would refuse, without echoing them", async () => {
 			const urlField = `${ids.bylineTwitter}u`;
 			const plan = await planFor({

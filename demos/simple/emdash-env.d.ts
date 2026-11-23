@@ -5,12 +5,26 @@
 
 import type { BylineSummary, ContentBylineCredit, TaxonomyTerm, PortableTextBlock } from "emdash";
 
+export interface PageLayoutRateCardsV1Block {
+  _type: "rate_cards";
+  _version: 1;
+  _key: string;
+  "heading"?: string | null;
+  "categories"?: { "label": string; "products"?: { "name": string; "rates"?: { "metric"?: string | null; "price"?: string | null; "link"?: string | null }[] | null }[] | null }[] | null;
+}
+
+export type PageLayoutRateCardsBlock = PageLayoutRateCardsV1Block;
+
+export type PageLayoutBlock = PageLayoutRateCardsBlock;
+
 export interface Page {
   id: string;
   slug: string | null;
   status: string;
   title: string;
   content?: PortableTextBlock[];
+  pricing?: { "label": string; "products"?: { "name": string; "rates"?: { "metric"?: string | null; "price"?: string | null; "link"?: string | null }[] | null }[] | null }[];
+  layout?: PageLayoutBlock[];
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;

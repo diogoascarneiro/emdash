@@ -4,6 +4,7 @@
  * values (column types, NOT NULL, Postgres int4 / float4).
  */
 
+import { dottedRepeaterLocation, visitRepeaterValues } from "../../schema/repeater-sub-fields.js";
 import { isSafeUrlFieldWriteValue } from "../../utils/url.js";
 import { isTransferError } from "../errors.js";
 import { measureJsonDepth } from "../format/canonical.js";
@@ -23,6 +24,7 @@ export interface FieldInfo {
 	/** Values live as content references; the target has no column for them. */
 	storageless?: boolean;
 	type?: "url" | "repeater" | "blocks";
+	/** Sub-field paths from `repeaterSubFieldPaths`, such as `link` or `items.link`. */
 	urlSubFields?: string[];
 }
 
@@ -208,14 +210,14 @@ function unsafeUrlFields(value: unknown, fields: readonly UrlValueField[], path:
 			}
 			continue;
 		}
-		for (const [index, row] of (arrayValue(fieldValue) ?? []).entries()) {
-			if (!isPlainObject(row)) continue;
-			for (const slug of field.urlSubFields ?? []) {
+		const rows = arrayValue(fieldValue);
+		for (const subFieldPath of field.urlSubFields ?? []) {
+			visitRepeaterValues(rows, subFieldPath, (row, slug, location) => {
 				const nested = row[slug];
 				if (typeof nested === "string" && !isSafeUrlFieldWriteValue(nested)) {
-					issues.push(`${fieldPath}.${index}.${slug}`);
+					issues.push(dottedRepeaterLocation(fieldPath, location));
 				}
-			}
+			});
 		}
 	}
 	return issues;

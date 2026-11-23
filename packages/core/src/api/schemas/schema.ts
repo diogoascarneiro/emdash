@@ -1,9 +1,11 @@
 import { z } from "zod";
 
+import { REPEATER_NESTING_MESSAGE } from "../../schema/repeater-sub-fields.js";
 import {
 	MAX_COLLECTION_GROUP_LENGTH,
 	MAX_COLLECTION_ICON_LENGTH,
 	MAX_COLLECTION_LIST_COLUMNS,
+	REPEATER_SUB_FIELD_TYPES,
 } from "../../schema/types.js";
 import { compileUrlPattern } from "../../schema/url-pattern.js";
 import { slugPattern } from "./common.js";
@@ -69,25 +71,53 @@ const fieldTypeValues = z.enum([
 	"blocks",
 ]);
 
-const repeaterSubFieldSchema = z.object({
-	slug: z.string().min(1).max(63).regex(slugPattern, "Invalid slug format"),
-	// Keep in sync with REPEATER_SUB_FIELD_TYPES in schema/types.ts.
-	// ("url" was already a documented sub-field type but missing here.)
-	type: z.enum([
-		"string",
-		"text",
-		"url",
-		"number",
-		"integer",
-		"boolean",
-		"datetime",
-		"select",
-		"image",
-	]),
+const subFieldSlug = z.string().min(1).max(63).regex(slugPattern, "Invalid slug format");
+
+const scalarRepeaterSubFieldSchema = z.object({
+	slug: subFieldSlug,
+	type: z.enum(REPEATER_SUB_FIELD_TYPES),
 	label: z.string().min(1),
 	required: z.boolean().optional(),
 	options: z.array(z.string()).optional(),
 });
+
+const tooDeepRepeaterSubFieldSchema = z
+	.looseObject({ type: z.literal("repeater") })
+	.superRefine((_value, ctx) => {
+		ctx.addIssue({ code: "custom", path: ["type"], message: REPEATER_NESTING_MESSAGE });
+	});
+
+// Unknown keys are rejected rather than stripped, so a misplaced `validation` or
+// `options` cannot silently drop part of a nested definition.
+function listSubFieldSchema<T extends z.ZodType>(rowSubField: T) {
+	return z
+		.strictObject({
+			slug: subFieldSlug,
+			type: z.literal("repeater"),
+			label: z.string().min(1),
+			required: z.boolean().optional(),
+			subFields: z.array(rowSubField).min(1),
+			minItems: z.number().int().min(0).optional(),
+			maxItems: z.number().int().min(1).optional(),
+		})
+		.refine((value) => (value.minItems ?? 0) <= (value.maxItems ?? Number.POSITIVE_INFINITY), {
+			path: ["maxItems"],
+			message: "maxItems must be greater than or equal to minItems",
+		});
+}
+
+const innermostRepeaterSubFieldSchema = listSubFieldSchema(
+	z.discriminatedUnion("type", [scalarRepeaterSubFieldSchema, tooDeepRepeaterSubFieldSchema]),
+);
+
+const nestedRepeaterSubFieldSchema = listSubFieldSchema(
+	z.discriminatedUnion("type", [scalarRepeaterSubFieldSchema, innermostRepeaterSubFieldSchema]),
+);
+
+export const repeaterSubFieldSchema = z.discriminatedUnion("type", [
+	scalarRepeaterSubFieldSchema,
+	nestedRepeaterSubFieldSchema,
+]);
 
 const urlPatternValue = z.string().superRefine((pattern, ctx) => {
 	try {

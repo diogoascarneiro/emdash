@@ -26,7 +26,9 @@ function isContentValidationIssue(value: unknown): value is ContentValidationIss
 	);
 }
 
-function isLabeledSubField(value: unknown): value is { slug: string; label: string } {
+function isLabeledSubField(
+	value: unknown,
+): value is { slug: string; label: string; subFields?: unknown } {
 	return (
 		typeof value === "object" &&
 		value !== null &&
@@ -37,26 +39,32 @@ function isLabeledSubField(value: unknown): value is { slug: string; label: stri
 	);
 }
 
-function subFieldLabel(field: ManifestFields[string], slug: string): string | undefined {
-	const subFields: unknown = field.validation?.subFields;
+function findSubField(subFields: unknown, slug: string | undefined) {
 	if (!Array.isArray(subFields)) return undefined;
 	const match: unknown = subFields.find(
 		(subField: unknown) => isLabeledSubField(subField) && subField.slug === slug,
 	);
-	return isLabeledSubField(match) && match.label ? match.label : undefined;
+	return isLabeledSubField(match) && match.label ? match : undefined;
 }
 
+/** Names `groups.0.links.1.url` as "URL (Links (Groups, item 1), item 2)". */
 function fieldName(path: string, fields: ManifestFields): string {
-	const [slug = path, row, subSlug] = path.split(".");
+	const [slug = path, ...rest] = path.split(".");
 	const field = fields[slug];
 	if (!field) return slug;
-	const label = getFieldLabel(slug, field);
-	const position = Number(row) + 1;
-	if (field.kind === "repeater" && subSlug && Number.isInteger(position)) {
-		const subLabel = subFieldLabel(field, subSlug);
-		if (subLabel) return i18n._(msg`${subLabel} (${label}, item ${position})`);
+	let name = getFieldLabel(slug, field);
+	if (field.kind !== "repeater") return name;
+	let subFields: unknown = field.validation?.subFields;
+	for (let at = 0; at + 1 < rest.length; at += 2) {
+		const position = Number(rest[at]) + 1;
+		const subField = findSubField(subFields, rest[at + 1]);
+		if (!Number.isInteger(position) || !subField) break;
+		const subLabel = subField.label;
+		const label = name;
+		name = i18n._(msg`${subLabel} (${label}, item ${position})`);
+		subFields = subField.subFields;
 	}
-	return label;
+	return name;
 }
 
 function describeIssue(issue: ContentValidationIssue, name: string): string {

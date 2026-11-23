@@ -252,4 +252,62 @@ describe("RepeaterField sub-field types", () => {
 		await expect.element(input).toBeVisible();
 		await expect.element(input).toHaveValue("CT");
 	});
+
+	describe("nested repeater sub-field", () => {
+		const subFields = [
+			{ slug: "label", type: "string", label: "Category" },
+			{
+				slug: "products",
+				type: "repeater",
+				label: "Products",
+				subFields: [{ slug: "name", type: "string", label: "Product" }],
+			},
+		];
+
+		function Harness({ onChange }: { onChange: (value: unknown) => void }) {
+			const [value, setValue] = React.useState<unknown>([
+				{ label: "Storage", products: [{ name: "R2" }] },
+			]);
+			return (
+				<RepeaterField
+					label="Categories"
+					id="categories"
+					value={value}
+					onChange={(next) => {
+						setValue(next);
+						onChange(next);
+					}}
+					subFields={subFields}
+				/>
+			);
+		}
+
+		it("edits rows of the nested list and saves them without keys", async () => {
+			const onChange = vi.fn();
+			const screen = await render(<Harness onChange={onChange} />);
+
+			await screen.getByLabelText("Product").fill("R2 Storage");
+			expect(onChange).toHaveBeenLastCalledWith([
+				{ label: "Storage", products: [{ name: "R2 Storage" }] },
+			]);
+
+			await screen.getByRole("button", { name: "Add Item", exact: true }).last().click();
+			await screen.getByLabelText("Product").last().fill("KV");
+			expect(onChange).toHaveBeenLastCalledWith([
+				{ label: "Storage", products: [{ name: "R2 Storage" }, { name: "KV" }] },
+			]);
+		});
+
+		it("starts a new row with an empty nested list", async () => {
+			const onChange = vi.fn();
+			const screen = await render(<Harness onChange={onChange} />);
+
+			await screen.getByRole("button", { name: "Add Item", exact: true }).first().click();
+
+			expect(onChange).toHaveBeenLastCalledWith([
+				{ label: "Storage", products: [{ name: "R2" }] },
+				{ label: "", products: [] },
+			]);
+		});
+	});
 });

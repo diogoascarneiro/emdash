@@ -112,6 +112,63 @@ describeEachDialect("content media usage field discovery", (dialect) => {
 		]);
 	});
 
+	it("discovers images in nested repeaters and prunes nested repeaters without any", async () => {
+		await registry.createField("posts", {
+			slug: "categories",
+			label: "Categories",
+			type: "repeater",
+			validation: {
+				subFields: [
+					{ slug: "label", type: "string", label: "Label" },
+					{
+						slug: "products",
+						type: "repeater",
+						label: "Products",
+						subFields: [
+							{ slug: "name", type: "string", label: "Name" },
+							{
+								slug: "rates",
+								type: "repeater",
+								label: "Rates",
+								subFields: [{ slug: "icon", type: "image", label: "Icon" }],
+							},
+						],
+					},
+					{
+						slug: "notes",
+						type: "repeater",
+						label: "Notes",
+						subFields: [{ slug: "text", type: "text", label: "Text" }],
+					},
+				],
+			},
+		});
+
+		const discovery = await loadContentMediaUsageFields(ctx.db, "posts");
+
+		expect(discovery.extractionFields).toEqual([
+			{
+				slug: "categories",
+				type: "repeater",
+				validation: {
+					subFields: [
+						{
+							slug: "products",
+							type: "repeater",
+							subFields: [
+								{
+									slug: "rates",
+									type: "repeater",
+									subFields: [{ slug: "icon", type: "image" }],
+								},
+							],
+						},
+					],
+				},
+			},
+		]);
+	});
+
 	it("fails closed on malformed repeater validation", async () => {
 		await registry.createField("posts", {
 			slug: "sections",

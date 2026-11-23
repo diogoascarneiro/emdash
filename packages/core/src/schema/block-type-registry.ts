@@ -29,7 +29,8 @@ import {
 	type ApplySeedBlockTypeInput,
 } from "./block-types.js";
 import { SchemaError } from "./registry.js";
-import { REPEATER_SUB_FIELD_TYPES, RESERVED_FIELD_SLUGS } from "./types.js";
+import { findUnsupportedRepeaterSubFieldType } from "./repeater-sub-fields.js";
+import { RESERVED_FIELD_SLUGS } from "./types.js";
 import { invalidateSchemaCache } from "./zod-generator.js";
 
 const SLUG_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -37,7 +38,6 @@ const MAX_SLUG_LENGTH = 63;
 const MAX_LABEL_LENGTH = 200;
 const UNIQUE_VIOLATION = /unique constraint failed|duplicate key value violates unique constraint/i;
 const BLOCK_FIELD_TYPE_SET: ReadonlySet<string> = new Set(BLOCK_FIELD_TYPES);
-const REPEATER_SUB_FIELD_TYPE_SET: ReadonlySet<string> = new Set(REPEATER_SUB_FIELD_TYPES);
 const RESERVED_BLOCK_TYPE_SLUGS: ReadonlySet<string> = new Set(RESERVED_FIELD_SLUGS);
 
 interface ParsedStoredFields {
@@ -123,18 +123,11 @@ function parseStoredFields(raw: string): ParsedStoredFields {
 			unsupportedTypes.push({ type: rawType, path: `fields[${index}].type` });
 		}
 		if (type === "repeater" && isRecord(entry.validation)) {
-			const subFields = entry.validation.subFields;
-			if (Array.isArray(subFields)) {
-				for (const [subIndex, subField] of subFields.entries()) {
-					if (!isRecord(subField) || typeof subField.type !== "string") continue;
-					if (!REPEATER_SUB_FIELD_TYPE_SET.has(subField.type)) {
-						unsupportedTypes.push({
-							type: subField.type,
-							path: `fields[${index}].validation.subFields[${subIndex}].type`,
-						});
-					}
-				}
-			}
+			const unsupported = findUnsupportedRepeaterSubFieldType(
+				entry.validation.subFields,
+				`fields[${index}].validation.subFields`,
+			);
+			if (unsupported) unsupportedTypes.push(unsupported);
 		}
 		// Stored definitions are written only after `validateBlockFields`. The
 		// runtime checks type discriminants above before exposing this shape and

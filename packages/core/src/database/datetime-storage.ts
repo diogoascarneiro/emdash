@@ -6,6 +6,7 @@ import {
 	normalizeDatetime,
 	type DatetimeFieldDescriptor,
 } from "../datetime-normalization.js";
+import { repeaterSubFieldPaths } from "../schema/repeater-sub-fields.js";
 import type { Database } from "./types.js";
 import { validateIdentifier } from "./validate.js";
 
@@ -116,18 +117,7 @@ function parseRepeaterDatetimeFields(validation: string | null): string[] {
 		return [];
 	}
 	if (typeof parsed !== "object" || parsed === null || !("subFields" in parsed)) return [];
-	const subFields = (parsed as { subFields?: unknown }).subFields;
-	if (!Array.isArray(subFields)) return [];
-	return subFields.flatMap((field) =>
-		typeof field === "object" &&
-		field !== null &&
-		"type" in field &&
-		field.type === "datetime" &&
-		"slug" in field &&
-		typeof field.slug === "string"
-			? [field.slug]
-			: [],
-	);
+	return repeaterSubFieldPaths(parsed.subFields, "datetime");
 }
 
 async function loadScanOptions(

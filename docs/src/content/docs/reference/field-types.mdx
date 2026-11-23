@@ -527,13 +527,54 @@ Repeater values are stored as an array of objects:
 ]
 ```
 
-The allowed sub-field types are `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`, `select`, and `image`. Repeaters cannot contain another repeater or a complex field such as `portableText`, `reference`, or `file`.
+The allowed sub-field types are `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`, `select`, `image`, and `repeater`. Repeaters cannot contain a complex field such as `portableText`, `reference`, or `file`.
 
 Repeater validation accepts these properties:
 
 - `subFields` — One or more sub-field definitions. Each definition requires `slug`, `label`, and `type`; it can also set `required`. A `select` sub-field supplies its choices through `options`.
 - `minItems` — Minimum number of rows. Must be zero or greater.
 - `maxItems` — Maximum number of rows. Must be one or greater and cannot be less than `minItems`.
+
+#### Nested repeaters
+
+A sub-field of type `repeater` holds its own list of rows. It sets `subFields`, `minItems`, and `maxItems` directly on the sub-field, not under `validation`, and accepts no other keys. Repeaters can be nested two levels deep inside a repeater field: a field's rows can hold a list, and that list's rows can hold one more list.
+
+The following field stores pricing categories, each with products and their rates:
+
+```ts
+{
+  slug: "categories",
+  label: "Categories",
+  type: "repeater",
+  validation: {
+    subFields: [
+      { slug: "label", label: "Category", type: "string", required: true },
+      {
+        slug: "products",
+        label: "Products",
+        type: "repeater",
+        maxItems: 10,
+        subFields: [
+          { slug: "name", label: "Product", type: "string", required: true },
+          {
+            slug: "rates",
+            label: "Rates",
+            type: "repeater",
+            subFields: [
+              { slug: "metric", label: "Metric", type: "string" },
+              { slug: "price", label: "Price", type: "string" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+}
+```
+
+For a collection field, add a nested repeater in the field editor: choose **Repeater** as a sub-field's type, then add its sub-fields and item limits. Block types have no admin editor, so define their nested repeaters in a seed file, through the schema API, or with MCP. Editors fill in nested rows in the content editor like any other rows.
+
+An existing sub-field cannot change between `repeater` and a single-value type, because stored rows would no longer match. Add a new sub-field instead.
 
 ### `blocks`
 

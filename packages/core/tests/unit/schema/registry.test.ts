@@ -420,6 +420,58 @@ describe("SchemaRegistry", () => {
 			).rejects.toMatchObject({ code: "UNSUPPORTED_FIELD_TYPE" });
 		});
 
+		it("reads two stored nested repeater levels and fails closed on a third", async () => {
+			const leaf = [{ slug: "price", label: "Price", type: "string" }];
+			const nested = (slug: string, subFields: unknown[]) => ({
+				slug,
+				label: slug,
+				type: "repeater",
+				subFields,
+			});
+			await registry.createField("posts", {
+				slug: "categories",
+				label: "Categories",
+				type: "repeater",
+				validation: {
+					subFields: [
+						{
+							slug: "products",
+							label: "Products",
+							type: "repeater",
+							subFields: [
+								{
+									slug: "rates",
+									label: "Rates",
+									type: "repeater",
+									subFields: [{ slug: "price", label: "Price", type: "string" }],
+								},
+							],
+						},
+					],
+				},
+			});
+			expect((await registry.getField("posts", "categories"))?.unsupportedType).toBeUndefined();
+
+			await db
+				.updateTable("_emdash_fields")
+				.set({
+					validation: JSON.stringify({
+						subFields: [nested("products", [nested("rates", [nested("tiers", leaf)])])],
+					}),
+				})
+				.where("slug", "=", "categories")
+				.execute();
+
+			const field = await registry.getField("posts", "categories");
+			expect(field?.unsupportedType).toEqual({
+				type: "repeater",
+				path: "validation.subFields[0].subFields[0].subFields[0].type",
+			});
+			await expect(
+				registry.updateField("posts", "categories", { label: "Changed" }),
+			).rejects.toMatchObject({ code: "UNSUPPORTED_FIELD_TYPE" });
+		});
+
 		it("preserves unsupported stored repeater sub-field types", async () => {
 			await registry.createField("posts", {
 				slug: "sections",

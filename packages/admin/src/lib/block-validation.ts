@@ -13,7 +13,7 @@ export interface BlockValueIssue {
 	blockIndex: number;
 	/** Label of the block's type. */
 	blockLabel: string;
-	/** The field slug inside the block, followed by a repeater item index and sub-field slug. */
+	/** The field slug inside the block, then item index and sub-field slug pairs into nested lists. */
 	path: string;
 	/** Slug of the block field that holds `path`. */
 	field: string;
@@ -42,7 +42,7 @@ interface FieldIssue extends IssueDetails {
 	item?: number;
 }
 
-interface SubFieldDefinition {
+interface SubFieldDefinition extends Record<string, unknown> {
 	slug: string;
 	label?: string;
 	type?: string;
@@ -148,41 +148,41 @@ function subFieldIssues(subField: SubFieldDefinition, value: unknown): IssueDeta
 	return optionIssues(options, value);
 }
 
-function repeaterIssues(field: BlockFieldDefinition, value: unknown[]): FieldIssue[] {
+/**
+ * Problems in the rows of a list at `path`. A nested list's own limits and rows are checked
+ * the same way; `item` stays the index in the block field's list, which holds them all.
+ */
+function repeaterIssues(
+	path: string,
+	label: string,
+	validation: Record<string, unknown> | undefined,
+	value: unknown[],
+	item?: number,
+): FieldIssue[] {
 	const issues: FieldIssue[] = [];
-	const minItems = finiteNumber(field.validation, "minItems");
-	const maxItems = finiteNumber(field.validation, "maxItems");
+	const minItems = finiteNumber(validation, "minItems");
+	const maxItems = finiteNumber(validation, "maxItems");
 	if (minItems !== undefined && value.length < minItems) {
-		issues.push({
-			path: field.slug,
-			label: field.label,
-			code: "too_small",
-			origin: "array",
-			minimum: minItems,
-		});
+		issues.push({ path, label, code: "too_small", origin: "array", minimum: minItems, item });
 	}
 	if (maxItems !== undefined && value.length > maxItems) {
-		issues.push({
-			path: field.slug,
-			label: field.label,
-			code: "too_big",
-			origin: "array",
-			maximum: maxItems,
-		});
+		issues.push({ path, label, code: "too_big", origin: "array", maximum: maxItems, item });
 	}
-	const subFields = Array.isArray(field.validation?.subFields)
-		? field.validation.subFields.filter(isSubFieldDefinition)
+	const subFields = Array.isArray(validation?.subFields)
+		? validation.subFields.filter(isSubFieldDefinition)
 		: [];
 	for (const [index, row] of value.entries()) {
 		if (!isRecord(row)) continue;
 		for (const subField of subFields) {
-			for (const issue of subFieldIssues(subField, row[subField.slug])) {
-				issues.push({
-					...issue,
-					path: `${field.slug}.${index}.${subField.slug}`,
-					label: subField.label || subField.slug,
-					item: index,
-				});
+			const subPath = `${path}.${index}.${subField.slug}`;
+			const subLabel = subField.label || subField.slug;
+			const subValue = row[subField.slug];
+			if (subField.type === "repeater" && Array.isArray(subValue)) {
+				issues.push(...repeaterIssues(subPath, subLabel, subField, subValue, item ?? index));
+				continue;
+			}
+			for (const issue of subFieldIssues(subField, subValue)) {
+				issues.push({ ...issue, path: subPath, label: subLabel, item: item ?? index });
 			}
 		}
 	}
@@ -204,7 +204,9 @@ function fieldIssues(field: BlockFieldDefinition, value: unknown): FieldIssue[] 
 	if (field.type === "select" || field.type === "multiSelect") {
 		return at(optionIssues(stringOptions(field.validation?.options), value));
 	}
-	if (field.type === "repeater" && Array.isArray(value)) return repeaterIssues(field, value);
+	if (field.type === "repeater" && Array.isArray(value)) {
+		return repeaterIssues(field.slug, field.label, field.validation, value);
+	}
 	return [];
 }
 

@@ -202,6 +202,51 @@ describeEachDialect("datetime normalization migration", (dialect) => {
 		});
 	});
 
+	it("normalizes datetimes inside nested repeater rows in content and revisions", async () => {
+		await new SchemaRegistry(ctx.db).createField("events", {
+			slug: "tours",
+			label: "Tours",
+			type: "repeater",
+			validation: {
+				subFields: [
+					{
+						slug: "stops",
+						label: "Stops",
+						type: "repeater",
+						subFields: [{ slug: "arrives_at", label: "Arrives at", type: "datetime" }],
+					},
+				],
+			},
+		});
+		const tours = [{ stops: [{ arrives_at: "2026-01-15T10:00" }, { arrives_at: null }] }];
+		await insertEvent("event-1", "2026-08-21T16:00:00.000Z", "2026-01-15T15:00:00.000Z");
+		await sql`UPDATE ec_events SET tours = ${JSON.stringify(tours)} WHERE id = 'event-1'`.execute(
+			ctx.db,
+		);
+		await insertRevisions([{ id: "revision-1", entryId: "event-1", data: { tours } }]);
+
+		await expect(scanDatetimeStorage(ctx.db)).resolves.toMatchObject({
+			noncanonicalCount: 2,
+			naiveCount: 2,
+		});
+		await normalizeDatetimeStorage(ctx.db);
+
+		const content = await sql<{ tours: unknown }>`
+			SELECT tours FROM ec_events WHERE id = 'event-1'
+		`.execute(ctx.db);
+		const expected = [
+			{ stops: [{ arrives_at: "2026-01-15T15:00:00.000Z" }, { arrives_at: null }] },
+		];
+		expect(parseJsonValue(content.rows[0]!.tours)).toEqual(expected);
+		const revision = await ctx.db
+			.selectFrom("revisions")
+			.select("data")
+			.where("id", "=", "revision-1")
+			.executeTakeFirstOrThrow();
+		expect(JSON.parse(revision.data)).toEqual({ tours: expected });
+		await expect(scanDatetimeStorage(ctx.db)).resolves.toMatchObject({ noncanonicalCount: 0 });
+	});
+
 	it("logs the report as info only when values are rewritten", async () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		const info = vi.spyOn(console, "info").mockImplementation(() => {});

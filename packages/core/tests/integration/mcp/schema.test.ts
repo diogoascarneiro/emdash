@@ -669,6 +669,46 @@ describe("schema_create_field", () => {
 		expect(field.type).toBe("string");
 	});
 
+	describe("repeater fields", () => {
+		const rates = {
+			slug: "rates",
+			type: "repeater",
+			label: "Rates",
+			subFields: [{ slug: "price", type: "string", label: "Price" }],
+		};
+		const create = (subFields: unknown[]) =>
+			harness.client.callTool({
+				name: "schema_create_field",
+				arguments: {
+					collection: "post",
+					slug: "categories",
+					label: "Categories",
+					type: "repeater",
+					validation: { subFields },
+				},
+			});
+
+		it("creates a repeater with a nested repeater and keeps both levels", async () => {
+			const subFields = [
+				{ slug: "name", type: "string", label: "Name" },
+				{ slug: "products", type: "repeater", label: "Products", subFields: [rates] },
+			];
+			const result = await create(subFields);
+			expect(result.isError, extractText(result)).toBeFalsy();
+			const stored = await new SchemaRegistry(db).getField("post", "categories");
+			expect(stored?.validation?.subFields).toEqual(subFields);
+		});
+
+		it("rejects a third level of nesting", async () => {
+			const tooDeep = { ...rates, subFields: [{ ...rates, slug: "tiers" }] };
+			const result = await create([
+				{ slug: "products", type: "repeater", label: "Products", subFields: [tooDeep] },
+			]);
+			expect(result.isError).toBe(true);
+			expect(await new SchemaRegistry(db).getField("post", "categories")).toBeNull();
+		});
+	});
+
 	it.each([
 		["text", "f_text"],
 		["number", "f_number"],

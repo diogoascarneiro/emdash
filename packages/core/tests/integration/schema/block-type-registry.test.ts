@@ -217,6 +217,52 @@ describeEachDialect("BlockTypeRegistry", (dialect) => {
 		).rejects.toMatchObject({ code: "UNSUPPORTED_FIELD_TYPE" });
 	});
 
+	it("stores two nested repeater levels and fails closed on a stored third", async () => {
+		const leaf = [{ slug: "price", label: "Price", type: "string" }];
+		const nested = (slug: string, subFields: unknown[]) => ({
+			slug,
+			label: slug,
+			type: "repeater",
+			subFields,
+		});
+		const menuFields = (inner: unknown[]): BlockFieldDefinition[] => [
+			{
+				slug: "sections",
+				label: "Sections",
+				type: "repeater",
+				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- nested sub-fields carry their own shape
+				validation: { subFields: [nested("dishes", inner)] } as BlockFieldDefinition["validation"],
+			},
+		];
+
+		const created = await registry.createBlockType({
+			slug: "menu",
+			label: "Menu",
+			fields: menuFields(leaf),
+		});
+		expect((await registry.getBlockType("menu"))?.versions[0]?.unsupportedTypes).toBeUndefined();
+
+		await ctx.db
+			.updateTable("_emdash_block_type_versions")
+			.set({ fields: JSON.stringify(menuFields([nested("rates", [nested("tiers", leaf)])])) })
+			.where("id", "=", created.versions[0]!.id)
+			.execute();
+
+		const reread = await registry.getBlockType("menu");
+		expect(reread?.versions[0]?.unsupportedTypes).toEqual([
+			{
+				type: "repeater",
+				path: "fields[0].validation.subFields[0].subFields[0].subFields[0].type",
+			},
+		]);
+		await expect(
+			registry.updateBlockType("menu", {
+				expectedFingerprint: created.versions[0]!.fingerprint,
+				label: "Unsafe edit",
+			}),
+		).rejects.toMatchObject({ code: "UNSUPPORTED_FIELD_TYPE" });
+	});
+
 	it("returns stable create and lookup errors", async () => {
 		await registry.createBlockType({ slug: "hero", label: "Hero", fields: heroFields });
 		await expect(

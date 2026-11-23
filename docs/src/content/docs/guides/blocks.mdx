@@ -105,7 +105,7 @@ A `repeater` field inside a block takes its shape from its sub-fields:
 
 - **Type-in list.** A list with exactly one sub-field, of type `string` or `url`, shows each item as a bulleted line. Enter adds a line, and pasting several lines adds one item per line. A list of client names fits this shape.
 - **Table.** A list with up to three sub-fields, each of type `string`, `url`, `number`, `integer`, `select` or `image`, and at most one `image`, shows a row per item and a column per sub-field. A list of stats with a value and a label fits this shape.
-- **Expandable items.** Every other list shows each item as a row that opens to edit its sub-fields. An open item lays out its sub-fields with the rules above, except that no sub-field is drawn as a headline or goes in an Advanced row, a photo gets a settings row, and `{image}_caption` is an ordinary text field.
+- **Expandable items.** Every other list shows each item as a row that opens to edit its sub-fields. An open item lays out its sub-fields with the rules above, except that no sub-field is drawn as a headline or goes in an Advanced row, a photo gets a settings row, and `{image}_caption` is an ordinary text field. A list with a `repeater` sub-field always shows as expandable items, and an open item shows the nested list with these same rules.
 
 An item's title is its first `string` sub-field that is neither a link field nor a button's text, or else its first `text` sub-field. A closed item shows its title, followed by up to two of its other `string` values. When those are all empty, it shows the start of its first other `text` value instead. In the Feature grid above, `items` shows as expandable items titled by `title`. Adding a fourth sub-field, or a `text` sub-field, to a table's block type turns the list into expandable items.
 
@@ -213,7 +213,7 @@ Old versions remain available for revisions, drafts, media tracking, and stored 
 
 ## Supported nested fields
 
-Block definitions support `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`, `select`, `multiSelect`, `portableText`, `image`, `file`, and `repeater`.
+Block definitions support `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`, `select`, `multiSelect`, `portableText`, `image`, `file`, and `repeater`. A repeater's sub-fields can include repeaters nested two levels deep, as described in [Nested repeaters](/reference/field-types/#nested-repeaters).
 
 References, JSON, slugs, nested blocks, custom widgets, physical indexes, uniqueness, and per-subfield localization are not supported inside a block definition. A blocks field itself cannot be required, unique, searchable, indexed, or assigned a custom field widget.
 

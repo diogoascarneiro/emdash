@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { mapRepeaterValues } from "./schema/repeater-sub-fields.js";
+
 export type DatetimeNormalizationKind = "canonical" | "offset" | "naive";
 
 export type DatetimeNormalizationErrorCode =
@@ -33,6 +35,7 @@ export class DatetimeNormalizationError extends Error {
 export interface DatetimeFieldDescriptor {
 	slug: string;
 	type: "datetime" | "repeater";
+	/** Sub-field paths from `repeaterSubFieldPaths`, such as `starts_at` or `sessions.starts_at`. */
 	datetimeSubFields?: readonly string[];
 }
 
@@ -55,10 +58,6 @@ interface LocalDatetimeParts {
 	minute: number;
 	second: number;
 	millisecond: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const NAIVE_DATETIME_PATTERN =
@@ -284,25 +283,16 @@ export function normalizeContentDatetimes(
 		}
 
 		if (!Array.isArray(current) || !field.datetimeSubFields?.length) continue;
-		let rows = current;
-		for (const [index, row] of current.entries()) {
-			if (!isRecord(row)) continue;
-			let nextRow = row;
-			for (const subField of field.datetimeSubFields) {
-				const nested = nextRow[subField];
-				if (nested === null || nested === undefined || nested === "") continue;
+		let rows: unknown[] = current;
+		for (const path of field.datetimeSubFields) {
+			rows = mapRepeaterValues(rows, path, (nested) => {
+				if (nested === null || nested === undefined || nested === "") return nested;
 				const normalized = normalizeDatetime(nested, timezone);
 				if (normalized.kind === "naive") naiveCount++;
-				if (!Object.is(normalized.value, nested)) {
-					changedCount++;
-					if (nextRow === row) nextRow = { ...nextRow };
-					nextRow[subField] = normalized.value;
-				}
-			}
-			if (nextRow !== row) {
-				if (rows === current) rows = [...current];
-				rows[index] = nextRow;
-			}
+				if (Object.is(normalized.value, nested)) return nested;
+				changedCount++;
+				return normalized.value;
+			});
 		}
 		if (rows !== current) write(field.slug, rows);
 	}

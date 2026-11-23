@@ -44,6 +44,32 @@ describe("describeContentValidationError", () => {
 		);
 	});
 
+	it("names a nested repeater sub-field with each row that holds it", () => {
+		const fields = {
+			groups: {
+				kind: "repeater",
+				label: "Groups",
+				validation: {
+					subFields: [
+						{
+							slug: "links",
+							type: "repeater",
+							label: "Links",
+							subFields: [{ slug: "url", type: "url", label: "URL" }],
+						},
+					],
+				},
+			},
+		};
+		const error = validationError([
+			{ path: "groups.0.links.1.url", code: "required", message: "required" },
+		]);
+
+		expect(describeContentValidationError(error, fields)).toBe(
+			"URL (Links (Groups, item 1), item 2) is required.",
+		);
+	});
+
 	it("falls back to the capitalized slug the editor shows for an unlabeled field", () => {
 		const error = validationError([
 			{ path: "subtitle", code: "too_small", origin: "string", minimum: 3, message: "x" },

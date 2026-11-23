@@ -26,6 +26,10 @@ export type ListPresentation = "lines" | "table" | "items";
 
 export interface ListSubField extends PlanField {
 	options?: string[];
+	/** A nested list's own sub-fields and limits, as stored. */
+	subFields?: unknown[];
+	minItems?: number;
+	maxItems?: number;
 }
 
 /** A block field, or a list's sub-field, as an open block lays it out. */
@@ -236,7 +240,16 @@ export function repeaterSubFields(field: Pick<BlockFieldDefinition, "validation"
 	if (!Array.isArray(subFields)) return [];
 	return subFields.flatMap((subField): ListSubField[] => {
 		if (!isRecord(subField)) return [];
-		const { slug, type, label, required, options } = subField;
+		const {
+			slug,
+			type,
+			label,
+			required,
+			options,
+			subFields: nested,
+			minItems,
+			maxItems,
+		} = subField;
 		if (typeof slug !== "string" || typeof type !== "string") return [];
 		return [
 			{
@@ -247,6 +260,9 @@ export function repeaterSubFields(field: Pick<BlockFieldDefinition, "validation"
 				...(Array.isArray(options)
 					? { options: options.filter((option): option is string => typeof option === "string") }
 					: {}),
+				...(type === "repeater" && Array.isArray(nested) ? { subFields: nested } : {}),
+				...(type === "repeater" && typeof minItems === "number" ? { minItems } : {}),
+				...(type === "repeater" && typeof maxItems === "number" ? { maxItems } : {}),
 			},
 		];
 	});

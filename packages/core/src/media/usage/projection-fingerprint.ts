@@ -2,7 +2,7 @@ import type {
 	MediaUsageOccurrenceInput,
 	MediaUsageSourceInput,
 } from "../../database/repositories/media-usage.js";
-import type { MediaUsageExtractionField } from "./types.js";
+import type { MediaUsageExtractionField, MediaUsageExtractionSubField } from "./types.js";
 
 export const MEDIA_USAGE_PROJECTION_FINGERPRINT_VERSION = 1;
 const FINGERPRINT_PREFIX = `media-usage-projection:v${MEDIA_USAGE_PROJECTION_FINGERPRINT_VERSION}:sha256:`;
@@ -104,12 +104,23 @@ function normalizeExtractionFields(
 			return {
 				slug: field.slug,
 				type: field.type,
-				subFields: (field.validation?.subFields ?? [])
-					.map((subField) => ({ slug: subField.slug, type: subField.type }))
-					.toSorted((a, b) => compareCanonicalStrings(a.slug, b.slug)),
+				subFields: subFieldIdentities(field.validation?.subFields),
 			};
 		})
 		.toSorted((a, b) => compareCanonicalStrings(String(a.slug), String(b.slug)));
+}
+
+/** Sub-field slugs and types, sorted, with a nested repeater's own sub-fields under it. */
+export function subFieldIdentities(
+	subFields: readonly MediaUsageExtractionSubField[] | undefined,
+): Record<string, unknown>[] {
+	return (subFields ?? [])
+		.map((subField) => ({
+			slug: subField.slug,
+			type: subField.type,
+			...(subField.subFields ? { subFields: subFieldIdentities(subField.subFields) } : {}),
+		}))
+		.toSorted((a, b) => compareCanonicalStrings(a.slug, b.slug));
 }
 
 function compareCanonicalStrings(a: string, b: string): number {

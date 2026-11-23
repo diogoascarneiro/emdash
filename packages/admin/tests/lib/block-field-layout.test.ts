@@ -11,6 +11,7 @@ import {
 	listPresentation,
 	type PlanField,
 	planBlockFields,
+	repeaterSubFields,
 } from "../../src/lib/block-field-layout.js";
 
 const format = {
@@ -562,5 +563,32 @@ describe("blockSummary", () => {
 			blockSummary({ heading: "Logos", logos: [{ logo: null }] }, "Logos", fields, format),
 		).toBeNull();
 		expect(blockSummary({}, "Logos", [], format)).toBeNull();
+	});
+});
+
+describe("repeaterSubFields", () => {
+	it("keeps a nested list's rows and limits, and nothing extra on single-value sub-fields", () => {
+		const nested = [{ slug: "price", type: "string", label: "Price" }];
+		const sub = repeaterSubFields({
+			validation: {
+				subFields: [
+					{ slug: "name", type: "string", label: "Name", subFields: nested, minItems: 1 },
+					{
+						slug: "rates",
+						type: "repeater",
+						label: "Rates",
+						subFields: nested,
+						minItems: 1,
+						maxItems: 4,
+					},
+					{ slug: "notes", type: "repeater", label: "Notes", subFields: "bad", maxItems: "4" },
+				],
+			},
+		});
+		expect(sub[0]).not.toHaveProperty("subFields");
+		expect(sub[0]).not.toHaveProperty("minItems");
+		expect(sub[1]).toMatchObject({ slug: "rates", subFields: nested, minItems: 1, maxItems: 4 });
+		expect(sub[2]).not.toHaveProperty("subFields");
+		expect(sub[2]).not.toHaveProperty("maxItems");
 	});
 });

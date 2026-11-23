@@ -91,7 +91,7 @@ The seed declares eleven versioned block types. Editors add, reorder, duplicate,
 Constraints worth remembering:
 
 - Block fields cannot contain nested object groups, so CTA labels and URLs remain sibling fields.
-- Repeaters cannot contain nested repeaters. Pricing `features` and the Text and image `points` checklist are therefore multiline text values: the renderers split them on newlines and drop empty lines. Text fields that hold prose (`body`, FAQ answers, quotes, and feature, plan, and contact descriptions) split into paragraphs on blank lines.
+- Pricing `features` and the Text and image `points` checklist are multiline text values: the renderers split them on newlines and drop empty lines. Text fields that hold prose (`body`, FAQ answers, quotes, and feature, plan, and contact descriptions) split into paragraphs on blank lines.
 - Every block lists `headline` first and `anchor_id` last, because the admin labels a collapsed block with its first filled-in text field. Block fields have no separate help text, so the labels carry it, such as the link formats a URL field accepts.
 - Repeaters have fixed limits: 1 to 3 pricing plans, 1 to 6 stats or contact options, 1 to 12 features, testimonials, or questions, and 1 to 24 logos. A page holds at most 20 blocks.
 - Every image field (hero and Text and image photos, the call to action background, logos, avatars) is an EmDash image field. Render it with `<Image>` from `emdash/ui`, not a raw URL, and treat it as optional: a failed download during setup leaves it empty.

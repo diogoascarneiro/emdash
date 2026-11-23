@@ -1127,6 +1127,53 @@ describe("Zod Generator", () => {
 
 			expect(ts).toContain(`specs: { "name": string }[];`);
 		});
+
+		describe("nested repeaters", () => {
+			const nestedSubFields: RepeaterSubField[] = [
+				{ slug: "label", label: "Label", type: "string", required: true },
+				{
+					slug: "products",
+					label: "Products",
+					type: "repeater",
+					minItems: 1,
+					maxItems: 2,
+					subFields: [
+						{ slug: "name", label: "Name", type: "string", required: true },
+						{
+							slug: "rates",
+							label: "Rates",
+							type: "repeater",
+							required: true,
+							subFields: [{ slug: "price", label: "Price", type: "number", required: true }],
+						},
+					],
+				},
+			];
+
+			it("emits a nested list type, optional only when the nested repeater is not required", () => {
+				const ts = generateTypeScript(makeRepeaterCollection(nestedSubFields));
+
+				expect(ts).toContain(
+					`specs?: { "label": string; "products"?: { "name": string; "rates": { "price": number }[] }[] | null }[];`,
+				);
+			});
+
+			it("validates nested rows, limits and required values", () => {
+				const collection = makeRepeaterCollection(nestedSubFields);
+				const row = (products: unknown) => ({ specs: [{ label: "A", products }] });
+				const ok = { name: "N", rates: [{ price: 1 }] };
+
+				expect(validateContent(collection, row([ok])).success).toBe(true);
+				expect(validateContent(collection, { specs: [{ label: "A" }] }).success).toBe(true);
+				expect(validateContent(collection, row(null)).success).toBe(true);
+				expect(validateContent(collection, row([])).success).toBe(false);
+				expect(validateContent(collection, row([ok, ok, ok])).success).toBe(false);
+				expect(validateContent(collection, row([{ name: "N" }])).success).toBe(false);
+				expect(
+					validateContent(collection, row([{ name: "N", rates: [{ price: "x" }] }])).success,
+				).toBe(false);
+			});
+		});
 	});
 
 	describe("reference fields", () => {

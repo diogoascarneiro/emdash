@@ -184,6 +184,44 @@ describe("validateBlocks", () => {
 		expect(issuesFor(fields, { title: " ", body: "\n", items: [{ name: "  " }] })).toEqual([]);
 	});
 
+	it("checks a nested list's rows and limits, under the outer item that holds them", () => {
+		const fields: BlockFieldDefinition[] = [
+			{
+				slug: "groups",
+				label: "Groups",
+				type: "repeater",
+				validation: {
+					subFields: [
+						{
+							slug: "links",
+							label: "Links",
+							type: "repeater",
+							maxItems: 1,
+							subFields: [{ slug: "url", label: "URL", type: "url", required: true }],
+						},
+					],
+				},
+			},
+		];
+
+		const issues = validateBlocks(
+			[
+				{
+					_type: "card",
+					_version: 1,
+					_key: "card",
+					groups: [{ links: [] }, { links: [{ url: "/a" }, { url: "" }] }],
+				},
+			],
+			[blockType(fields)],
+		);
+
+		expect(issues.map(({ path, code, item, label }) => ({ path, code, item, label }))).toEqual([
+			{ path: "groups.1.links", code: "too_big", item: 1, label: "Links" },
+			{ path: "groups.1.links.1.url", code: "required", item: 1, label: "URL" },
+		]);
+	});
+
 	it("accepts an empty required multiSelect, rich text or list, unless the list has a minimum", () => {
 		const fields: BlockFieldDefinition[] = [
 			{ slug: "topics", label: "Topics", type: "multiSelect", required: true },

@@ -482,6 +482,53 @@ describe("validateSeed", () => {
 			expect(result.warnings).toEqual([]);
 		});
 
+		describe("nested repeaters", () => {
+			const leaf = [{ slug: "metric", label: "Metric", type: "string" }];
+			const nested = (slug: string, subFields: unknown[]) => ({
+				slug,
+				label: slug,
+				type: "repeater",
+				subFields,
+			});
+
+			it("accepts a repeater nested inside a repeater, and one more level", () => {
+				const result = seedWithRepeater({
+					validation: {
+						subFields: [
+							{ slug: "title", label: "Title", type: "string" },
+							nested("products", [nested("rates", leaf)]),
+						],
+					},
+				});
+				expect(result.errors).toEqual([]);
+				expect(result.valid).toBe(true);
+			});
+
+			it("rejects a third level at the innermost repeater, with the full path", () => {
+				const result = seedWithRepeater({
+					validation: {
+						subFields: [nested("products", [nested("rates", [nested("tiers", leaf)])])],
+					},
+				});
+				expect(result.valid).toBe(false);
+				expect(result.errors).toEqual([
+					"collections[0].fields[0].validation.subFields[0].subFields[0].subFields[0].type: Repeaters can be nested only 2 levels deep",
+				]);
+			});
+
+			it("rejects a malformed nested repeater", () => {
+				const result = seedWithRepeater({
+					validation: {
+						subFields: [nested("products", [{ slug: "rates", label: "Rates", type: "repeater" }])],
+					},
+				});
+				expect(result.valid).toBe(false);
+				expect(result.errors).toEqual([
+					"collections[0].fields[0].validation.subFields[0].subFields[0].subFields: must be a non-empty array",
+				]);
+			});
+		});
+
 		it("finds no repeater sub-field warnings in the repository's seeds", () => {
 			const root = resolve(import.meta.dirname, "../../../../..");
 			const seeds = ["templates", "demos", "infra", "fixtures"].flatMap((dir) =>

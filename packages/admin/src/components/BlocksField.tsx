@@ -417,8 +417,70 @@ function nestedDescriptor(
 	};
 }
 
-function listFieldDefinition({ options, ...subField }: ListSubField): LayoutFieldDefinition {
+function listFieldDefinition({
+	options,
+	subFields,
+	minItems,
+	maxItems,
+	...subField
+}: ListSubField): LayoutFieldDefinition {
+	if (subField.type === "repeater") {
+		return { ...subField, validation: { subFields, minItems, maxItems } };
+	}
 	return options ? { ...subField, validation: { options } } : subField;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** `value` with the list at `path` (`field.0.sub`, slugs and item indexes) replaced by `items`. */
+function withListAt(value: unknown, path: readonly string[], items: unknown[]): unknown {
+	const [segment, ...rest] = path;
+	if (segment === undefined) return items;
+	if (Array.isArray(value)) {
+		const index = Number(segment);
+		return value.map((entry, at) => (at === index ? withListAt(entry, rest, items) : entry));
+	}
+	const record = isRecord(value) ? value : {};
+	return { ...record, [segment]: withListAt(record[segment], rest, items) };
+}
+
+function listAt(value: unknown, path: readonly string[]): unknown {
+	return path.reduce<unknown>(
+		(current, segment) =>
+			Array.isArray(current)
+				? current[Number(segment)]
+				: isRecord(current)
+					? current[segment]
+					: undefined,
+		value,
+	);
+}
+
+/** The block's field or list at `path`, following item indexes into nested lists. */
+function fieldElementAt(row: Element, path: string): HTMLElement | undefined {
+	const [first, ...rest] = path.split(".");
+	let element = [...row.querySelectorAll<HTMLElement>("[data-block-body] [data-field]")].find(
+		(candidate) =>
+			candidate.dataset.field === first &&
+			!candidate.parentElement?.closest("[data-block-body] [data-field]"),
+	);
+	for (let at = 0; element && at + 1 < rest.length; at += 2) {
+		const item = listItemsOf(element)[Number(rest[at])];
+		element = [...(item?.querySelectorAll<HTMLElement>("[data-field]") ?? [])].find(
+			(candidate) => candidate.dataset.field === rest[at + 1],
+		);
+	}
+	return element;
+}
+
+/** The list items directly in `list`, leaving out those of lists nested in its items. */
+function listItemsOf(list: Element | null | undefined): HTMLElement[] {
+	if (!list) return [];
+	return [...list.querySelectorAll<HTMLElement>("[data-list-item]")].filter(
+		(item) => item.parentElement?.closest("[data-block-body] [data-field]") === list,
+	);
 }
 
 function listLimit(field: LayoutFieldDefinition, key: "minItems" | "maxItems") {
@@ -691,12 +753,18 @@ export function BlocksField({
 			if (node.id.startsWith(prefix))
 				return viewRank(order, blockIndex, node.id.slice(prefix.length));
 		}
-		const list = element.closest<HTMLElement>("[data-block-body] [data-field]");
+		let list = element.closest<HTMLElement>("[data-block-body] [data-field]");
+		for (
+			let outer = list?.parentElement?.closest<HTMLElement>("[data-block-body] [data-field]");
+			outer;
+			outer = outer.parentElement?.closest<HTMLElement>("[data-block-body] [data-field]")
+		) {
+			list = outer;
+		}
 		const field = list?.dataset.field;
 		if (!list || !field) return [blockIndex, -1];
-		const item = element.closest("[data-list-item]");
-		const index = item ? [...list.querySelectorAll("[data-list-item]")].indexOf(item) : -1;
-		return viewRank(order, blockIndex, item ? `${field}.${index}` : field);
+		const index = listItemsOf(list).findIndex((item) => item.contains(element));
+		return viewRank(order, blockIndex, index >= 0 ? `${field}.${index}` : field);
 	};
 
 	/** Goes to the problem after the last place in a block that had focus, or back to the first. */
@@ -737,10 +805,7 @@ export function BlocksField({
 		focusRequestRef.current = null;
 		const toggle = row.querySelector<HTMLElement>("[data-block-toggle]");
 		if (request.target === "item") {
-			const list = [...row.querySelectorAll<HTMLElement>("[data-block-body] [data-field]")].find(
-				(element) => element.dataset.field === request.field,
-			);
-			const item = list?.querySelectorAll<HTMLElement>("[data-list-item]")[request.index];
+			const item = listItemsOf(fieldElementAt(row, request.field))[request.index];
 			focusTo(
 				focusableIn(item?.querySelector("[data-item-focus]")) ?? focusableIn(item) ?? toggle,
 				request.scroll,
@@ -757,13 +822,8 @@ export function BlocksField({
 			const target = () =>
 				(exact ? null : firstShown()) ?? focusableIn(document.getElementById(elementId));
 			const focusControl = () => {
-				const field = [...row.querySelectorAll<HTMLElement>("[data-block-body] [data-field]")].find(
-					(element) => element.dataset.field === request.field,
-				);
-				const fallback =
-					request.item === undefined
-						? field
-						: field?.querySelectorAll<HTMLElement>("[data-list-item]")[request.item];
+				const field = fieldElementAt(row, request.field);
+				const fallback = request.item === undefined ? field : listItemsOf(field)[request.item];
 				const control = target() ?? focusableIn(fallback) ?? firstShown() ?? toggle;
 				if (request.onFocused && control) {
 					control.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -785,12 +845,18 @@ export function BlocksField({
 		focusTo(control ?? toggle, request.scroll);
 	});
 
-	const listMaxItems = (block: StoredBlockValue, field: string) => {
-		const definition = typeBySlug
+	/** The item limit of the list at `path` (`field`, or `field.0.sub` for a nested list). */
+	const listMaxItems = (block: StoredBlockValue, path: string) => {
+		const [top = "", ...rest] = path.split(".");
+		let list: LayoutFieldDefinition | undefined = typeBySlug
 			.get(block._type)
 			?.versions.find((candidate) => candidate.version === block._version)
-			?.fields.find((candidate) => candidate.slug === field);
-		return (definition && listLimit(definition, "maxItems")) ?? Infinity;
+			?.fields.find((candidate) => candidate.slug === top);
+		for (let at = 1; list && at < rest.length; at += 2) {
+			const next = repeaterSubFields(list).find((candidate) => candidate.slug === rest[at]);
+			list = next && listFieldDefinition(next);
+		}
+		return (list && listLimit(list, "maxItems")) ?? Infinity;
 	};
 
 	// Undo can't put back what no longer fits, or anything once the field is read-only.
@@ -808,7 +874,8 @@ export function BlocksField({
 		// A photo's control closes its own Undo once it can't put the photo back.
 		if (owner.kind === "field") return;
 		const block = blocks.find((candidate) => candidate._key === owner.blockKey);
-		const items = block?.[owner.field];
+		const [topField = owner.field, ...rest] = owner.field.split(".");
+		const items = block && listAt(block[topField], rest);
 		if (!block || (Array.isArray(items) && items.length >= listMaxItems(block, owner.field))) {
 			undo.dismiss();
 		}
@@ -906,11 +973,15 @@ export function BlocksField({
 		(blockKey: string, field: string, { item, index }: DeletedListItem) => {
 			const block = blocks.find((candidate) => candidate._key === blockKey);
 			if (!block) return;
-			const current = block[field];
+			// `field` is a list's path in the block, such as `groups.0.links` for a nested list.
+			const [topField = field, ...rest] = field.split(".");
+			const current = listAt(block[topField], rest);
 			const items = Array.isArray(current) ? [...current] : [];
 			const at = Math.min(index, items.length);
 			items.splice(at, 0, item);
-			onChange(updateBlockFieldValue(blocks, blockKey, field, items));
+			onChange(
+				updateBlockFieldValue(blocks, blockKey, topField, withListAt(block[topField], rest, items)),
+			);
 			moveListTouches(blockKey, field, (position) => (position < at ? position : position + 1));
 			focusRequestRef.current = {
 				key: blockKey,
@@ -1105,6 +1176,15 @@ export function BlocksField({
 											onItemDeleted={(field, deleted) => offerItemUndo(block._key, field, deleted)}
 											onItemsShift={(field, moves) => {
 												moveListTouches(block._key, field, (position) => moves[position] ?? -1);
+												// Undo of an item in a list nested under this one names its parent by position.
+												const owner = undo.owner();
+												if (
+													owner?.kind === "item" &&
+													owner.blockKey === block._key &&
+													owner.field.startsWith(`${field}.`)
+												) {
+													undo.dismiss();
+												}
 												if (moves.includes(-1)) editField(block._key, field);
 											}}
 											onChange={(field, nextValue) =>
@@ -1401,19 +1481,28 @@ function BlockRow({
 	const issueMessage = useIssueMessage();
 	const blockPath = `${fieldPath}.${block._key}`;
 	const issueAt = (path: string) => issues.find((issue) => issue.path === path);
-	const renderList = (field: LayoutFieldDefinition, labelledBy: string) => {
-		const listIssue = issueAt(field.slug);
+	/** The list `field` at `listPath` in the block: a block field, or a list inside a list item. */
+	const renderListAt = (
+		listPath: string,
+		field: LayoutFieldDefinition,
+		value: unknown,
+		setItems: (items: unknown[]) => void,
+		labelledBy: string,
+	): React.ReactNode => {
+		const listIssue = issueAt(listPath);
 		const invalidItems = new Set(
-			issues.flatMap((issue) =>
-				issue.field === field.slug && issue.item !== undefined ? [issue.item] : [],
-			),
+			issues.flatMap((issue) => {
+				if (!issue.path.startsWith(`${listPath}.`)) return [];
+				const [position = ""] = issue.path.slice(listPath.length + 1).split(".");
+				return LIST_ITEM_INDEX.test(position) ? [Number(position)] : [];
+			}),
 		);
 		return (
 			<BlockListField
 				labelId={labelledBy}
 				label={field.label}
-				value={block[field.slug]}
-				onChange={(items) => onChange(field.slug, items)}
+				value={value}
+				onChange={setItems}
 				subFields={repeaterSubFields(field)}
 				minItems={listLimit(field, "minItems")}
 				maxItems={listLimit(field, "maxItems")}
@@ -1421,13 +1510,13 @@ function BlockRow({
 				error={listIssue && issueMessage(listIssue)}
 				invalidItems={invalidItems}
 				revealToken={revealToken}
-				revealItem={revealItem?.field === field.slug ? revealItem.index : undefined}
-				onItemDeleted={(deleted) => onItemDeleted(field.slug, deleted)}
+				revealItem={revealItem?.field === listPath ? revealItem.index : undefined}
+				onItemDeleted={(deleted) => onItemDeleted(listPath, deleted)}
 				onItemDeleteStart={undo?.hold}
-				onItemsShift={(moves) => onItemsShift(field.slug, moves)}
+				onItemsShift={(moves) => onItemsShift(listPath, moves)}
 				renderControl={({ subField, at, onChange: onControlChange, ...control }) => {
 					const definition = listFieldDefinition(subField);
-					const path = `${field.slug}.${at}.${subField.slug}`;
+					const path = `${listPath}.${at}.${subField.slug}`;
 					return (
 						<FieldControl
 							field={definition}
@@ -1447,18 +1536,35 @@ function BlockRow({
 						scope="item"
 						fields={subFields.map(listFieldDefinition)}
 						values={item}
-						namePrefix={`${blockPath}.${field.slug}.${at}`}
+						namePrefix={`${blockPath}.${listPath}.${at}`}
 						describe={(definition) => nestedDescriptor(definition, block)}
-						issueAt={(slug) => issueAt(`${field.slug}.${at}.${slug}`)}
-						onTouch={(slug) => onTouch(`${field.slug}.${at}.${slug}`)}
-						onEdit={(slug) => onEdit(`${field.slug}.${at}.${slug}`)}
+						issueAt={(slug) => issueAt(`${listPath}.${at}.${slug}`)}
+						onTouch={(slug) => onTouch(`${listPath}.${at}.${slug}`)}
+						onEdit={(slug) => onEdit(`${listPath}.${at}.${slug}`)}
 						onChange={onItemChange}
 						renderField={renderField}
+						renderList={(subField, subLabelledBy) =>
+							renderListAt(
+								`${listPath}.${at}.${subField.slug}`,
+								subField,
+								item[subField.slug],
+								(items) => onItemChange(subField.slug, items),
+								subLabelledBy,
+							)
+						}
 					/>
 				)}
 			/>
 		);
 	};
+	const renderList = (field: LayoutFieldDefinition, labelledBy: string) =>
+		renderListAt(
+			field.slug,
+			field,
+			block[field.slug],
+			(items) => onChange(field.slug, items),
+			labelledBy,
+		);
 
 	return (
 		<div

@@ -403,9 +403,14 @@ export function BlockListField({
 
 	const newItem = (): ListItem =>
 		Object.fromEntries(
-			subFields
-				.filter((subField) => subField.type === "boolean")
-				.map((subField) => [subField.slug, false]),
+			subFields.flatMap(
+				(subField): Array<[string, unknown]> =>
+					subField.type === "boolean"
+						? [[subField.slug, false]]
+						: subField.type === "repeater"
+							? [[subField.slug, []]]
+							: [],
+			),
 		);
 
 	const updateRow = (key: string, slug: string, next: unknown) => {
